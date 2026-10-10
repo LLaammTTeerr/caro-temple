@@ -28,7 +28,7 @@ front() { osascript -e "tell application \"System Events\" to set frontmost of (
 key() { for k in "$@"; do osascript -e "tell application \"System Events\" to key code $k" >/dev/null; sleep "$(awk "BEGIN{print 0.25*$S}")"; done; }
 start_game() {
   : > "$TRACE"
-  (cd "$BUILD" && env CARO_DATA_DIR="$WORK/data" CARO_TRACE="$TRACE" CARO_AFK_IDLE=600 ./caro >"$WORK/game.log" 2>&1) & GPID=$!
+  (cd "$BUILD" && exec env CARO_DATA_DIR="$WORK/data" CARO_TRACE="$TRACE" CARO_AFK_IDLE=600 ./caro >"$WORK/game.log" 2>&1) & GPID=$!
   MARK=0; waitfor "scene 0" "window up (pid $GPID)"
   sleep "$(awk "BEGIN{print 1.5*$S}")"; front; sleep 1
 }
