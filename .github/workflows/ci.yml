@@ -34,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libgl1-mesa-dev libasound2-dev libxtst6 xvfb
+            libgl1-mesa-dev libasound2-dev libxtst6 xvfb tmux
 
       - name: Configure
         shell: bash
@@ -67,12 +67,48 @@ jobs:
           XINJ_SCALE: "2"
         run: tests/e2e_gui.sh build
 
+      - name: Terminal version end-to-end test (tmux)
+        if: runner.os != 'Windows'
+        env:
+          XINJ_SCALE: "2"
+        run: |
+          command -v tmux >/dev/null || brew install tmux
+          tests/e2e_tui.sh build
+
+      - name: GUI runtime screenshots (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd build
+          export CARO_DATA_DIR="$RUNNER_TEMP/caro-data"
+          for s in home setup profile settings saves "game --board 3" "game --board 10" pause gameover; do
+            n=$(echo $s | tr -d ' -')
+            ./caro --scene $s --frames 30 --shot "$RUNNER_TEMP/macos-$n.png"
+            test -s "$RUNNER_TEMP/macos-$n.png"
+          done
+
+      - name: GUI runtime screenshots (Windows, Mesa llvmpipe OpenGL)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $mesa = "$env:RUNNER_TEMP\mesa"
+          Invoke-WebRequest -Uri "https://github.com/pal1000/mesa-dist-win/releases/download/26.1.8/mesa3d-26.1.8-release-msvc.7z" -OutFile "$env:RUNNER_TEMP\mesa.7z"
+          7z x "$env:RUNNER_TEMP\mesa.7z" -o"$mesa" | Out-Null
+          Copy-Item "$mesa\x64\*.dll" build\Release\
+          $env:GALLIUM_DRIVER = "llvmpipe"
+          $env:CARO_DATA_DIR = "$env:RUNNER_TEMP\caro-data"
+          Set-Location build\Release
+          foreach ($s in @("home", "setup", "profile", "settings", "saves", "game", "pause", "gameover")) {
+            $p = Start-Process -FilePath .\caro.exe -ArgumentList "--scene $s --board 5 --frames 30 --shot $env:RUNNER_TEMP\windows-$s.png" -Wait -PassThru -NoNewWindow
+            if (-not (Test-Path "$env:RUNNER_TEMP\windows-$s.png")) { Write-Error "no screenshot for $s (exit $($p.ExitCode))"; exit 1 }
+          }
+
       - name: Upload screenshots
-        if: runner.os == 'Linux' && matrix.cc == 'gcc'
+        if: always() && (matrix.cc == 'gcc' || runner.os != 'Linux')
         uses: actions/upload-artifact@v4
         with:
-          name: screenshots
+          name: screenshots-${{ matrix.os }}-${{ matrix.cc }}
           path: ${{ runner.temp }}/*.png
+          if-no-files-found: ignore
 
   windows-mingw:
     name: Windows (MinGW-w64 GCC)
