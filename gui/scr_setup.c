@@ -12,6 +12,7 @@
 #include "audio.h"
 #include "input.h"
 #include "app.h"
+#include "../core/game.h"
 #include "../core/i18n.h"
 
 #define PANEL_X      260
@@ -30,6 +31,9 @@
 #define BOARD_GAP    20                      /* 3*224 + 2*20 = 712 */
 #define MODE_W       348
 #define ROW_DIFF_Y   424
+#define DIFF_VALUE_W 400                     /* difficulty widget: label + value box; champion strip sits right of it */
+#define CHAMP_X      (CONTENT_X + 412)
+#define CHAMP_PX     56
 #define ROW_RULE_Y   488
 #define ROW_H        56
 #define RULE_DESC_Y  548
@@ -59,10 +63,10 @@ static void card_selected_check(Rectangle r, bool selected)
 static void dim_rect(Rectangle r) { DrawRectangleRec(r, Fade(COL_STONE_900, 0.55f)); }
 
 /* Card content is drawn after the card's ui_button so it sits above the widget's fill. */
-static void draw_mode_card(Rectangle r, GameMode mode, bool selected, float t, bool animate)
+static void draw_mode_card(Rectangle r, GameMode mode, MascotId champion, bool selected, float t, bool animate)
 {
     if (mode == MODE_PVE) {
-        art_draw_mascot(MASCOT_ROBOT, (Rectangle){ r.x + CARD_PAD + 16, r.y + (r.height - 96) / 2, 96, 96 }, t, animate);
+        art_draw_mascot(champion, (Rectangle){ r.x + CARD_PAD + 16, r.y + (r.height - 96) / 2, 96, 96 }, t, animate);
     } else {
         art_draw_mascot(MASCOT_FIRE, (Rectangle){ r.x + CARD_PAD, r.y + (r.height - 64) / 2, 64, 64 }, t, animate);
         art_draw_mascot(MASCOT_WATER, (Rectangle){ r.x + CARD_PAD + 64, r.y + (r.height - 64) / 2, 64, 64 }, t, animate);
@@ -112,6 +116,21 @@ static void draw_board_card(Rectangle r, int idx, bool selected)
     card_selected_check(r, selected);
 }
 
+/* Champion strip beside the difficulty value: small portrait, name and title (title shrinks to fit). */
+static void draw_champion_strip(Difficulty d, float t)
+{
+    float y = ROW_DIFF_Y;
+    art_draw_avatar(game_champion_avatar(d), (Rectangle){ CHAMP_X, y + (ROW_H - CHAMP_PX) / 2.0f, CHAMP_PX, CHAMP_PX }, t);
+    float tx = CHAMP_X + CHAMP_PX + SP_1 - 4;
+    float avail = (CONTENT_X + CONTENT_W) - tx;
+    const char *name = tr((StrId)(S_CHAMP_EASY + d));
+    const char *title = tr((StrId)(S_CHAMP_EASY_TITLE + d));
+    float fs = FS_SMALL;
+    while (fs > 16.0f && text_measure(title, fs).x > avail) fs -= 1.0f;
+    text_draw(name, tx, y + 2, FS_SMALL, COL_GOLD);
+    text_draw(title, tx, y + ROW_H - text_measure(title, fs).y - 2, fs, COL_TEXT_DIM);
+}
+
 static void enter(void)
 {
     ui_focus_scope(0);
@@ -155,7 +174,7 @@ static void draw(void)
         bool sel = s->last_mode == m;
         ui_panel(mode_r[i]);
         bool clicked = ui_button(mode_r[i], "", BTN_GHOST);
-        draw_mode_card(mode_r[i], m, sel, t, animate);
+        draw_mode_card(mode_r[i], m, (MascotId)game_champion_avatar(s->last_diff), sel, t, animate);
         if (clicked) s->last_mode = m;
     }
 
@@ -171,15 +190,17 @@ static void draw(void)
         if (clicked) s->last_board = boards[i];
     }
 
-    /* Difficulty: only meaningful against the computer; shown dimmed otherwise. */
+    /* Difficulty: only meaningful against the computer; shown dimmed otherwise. The champion for the
+     * chosen difficulty is shown beside it, live. */
     {
         const char *opts[3] = { tr(S_DIFF_EASY), tr(S_DIFF_MEDIUM), tr(S_DIFF_HARD) };
         int sel = (int)s->last_diff;
-        Rectangle r = { CONTENT_X, ROW_DIFF_Y, CONTENT_W, ROW_H };
+        Rectangle r = { CONTENT_X, ROW_DIFF_Y, DIFF_VALUE_W, ROW_H };
         ui_set_interactive(pve);
         if (ui_choice(r, tr(S_DIFFICULTY), opts, 3, &sel)) s->last_diff = (Difficulty)sel;
         ui_set_interactive(true);
-        if (!pve) dim_rect(r);
+        draw_champion_strip(s->last_diff, t);
+        if (!pve) dim_rect((Rectangle){ CONTENT_X, ROW_DIFF_Y, CONTENT_W, ROW_H });
     }
 
     /* Blocked-ends rule: only for 5x5 and 10x10. */
