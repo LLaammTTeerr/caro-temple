@@ -274,6 +274,59 @@ static void test_afk(void)
     game_afk_grace_s = old_grace;
 }
 
+/* A click during the AFK prompt (modal) or after the AFK timeout must not place a stone. */
+static void test_play_blocked_by_afk(void)
+{
+    double old_idle = game_afk_idle_s, old_grace = game_afk_grace_s;
+    game_afk_idle_s = 1.0;
+    game_afk_grace_s = 0.5;
+
+    /* AFK_PROMPT: play refused, board, turn, history and idle untouched */
+    Game g;
+    new_pvp(&g, 3);
+    game_tick(&g, 1.0, false);
+    CHECK(g.afk == AFK_PROMPT);
+    CHECK(!game_play(&g, 0, 0));
+    CHECK(g.move_count == 0);
+    CHECK(g.board.c[0][0] == CELL_EMPTY);
+    CHECK(g.turn == 0);
+    CHECK(near(g.idle, 1.0));                /* a refused click is not activity */
+
+    /* after "keep playing" the same click works */
+    game_afk_continue(&g);
+    CHECK(game_play(&g, 0, 0));
+    CHECK(g.move_count == 1 && g.turn == 1);
+
+    /* AFK_TIMEOUT: stray click refused, and it stays refused until the frontend acts */
+    Game t;
+    new_pvp(&t, 3);
+    game_tick(&t, 1.0, false);
+    game_tick(&t, 0.5, false);
+    CHECK(t.afk == AFK_TIMEOUT);
+    CHECK(!game_play(&t, 1, 1));
+    CHECK(t.move_count == 0 && t.board.c[1][1] == CELL_EMPTY && t.turn == 0);
+    CHECK(t.status == GS_PLAYING);
+    game_tick(&t, 10.0, false);
+    CHECK(!game_play(&t, 1, 1));
+    CHECK(t.move_count == 0);
+
+    /* PvE: the human cannot play while the prompt is up, so the AI is not left in a
+     * half-applied state either */
+    Game p;
+    new_pve(&p, 3);
+    CHECK(game_play(&p, 0, 0));              /* human */
+    game_tick(&p, 1.0, false);               /* AI turn: idle does not count, no prompt */
+    CHECK(p.afk == AFK_NONE);
+    CHECK(game_play(&p, 1, 1));              /* AI reply */
+    game_tick(&p, 1.0, false);               /* human turn: prompt */
+    CHECK(p.afk == AFK_PROMPT);
+    CHECK(!game_play(&p, 0, 1));
+    CHECK(p.move_count == 2 && p.turn == 0);
+
+    game_afk_idle_s = old_idle;
+    game_afk_grace_s = old_grace;
+}
+
 static void test_pvp_undo(void)
 {
     Game g;
@@ -422,6 +475,7 @@ int main(void)
     test_draw_3x3();
     test_clocks();
     test_afk();
+    test_play_blocked_by_afk();
     CHECK(near(game_afk_idle_s, 120.0));
     CHECK(near(game_afk_grace_s, 30.0));
     test_pvp_undo();

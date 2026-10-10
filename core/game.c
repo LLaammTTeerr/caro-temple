@@ -67,7 +67,8 @@ bool game_last_move(const Game *g, Pos *out)
 
 bool game_play(Game *g, int r, int c)
 {
-    if (g->status != GS_PLAYING || g->undo_requester >= 0) return false;
+    /* AFK prompt is modal and AFK timeout awaits the frontend: no moves until continued. */
+    if (g->status != GS_PLAYING || g->undo_requester >= 0 || g->afk != AFK_NONE) return false;
     if (!board_place(&g->board, r, c, game_cell_of(g->turn))) return false;
 
     /* Only human moves count as activity; the AI's move must not reset idle. */

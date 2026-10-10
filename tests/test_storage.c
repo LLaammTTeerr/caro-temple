@@ -1,4 +1,7 @@
 /* test_storage.c - settings and save slot persistence (core/storage.c). */
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#endif
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -6,12 +9,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+/* storage.h before <windows.h>: windows.h defines an S_OK macro that clashes with i18n.h */
+#include "storage.h"
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #include <direct.h>
+#include <sys/utime.h>
 #else
 #include <unistd.h>
+#include <utime.h>
 #endif
-#include "storage.h"
 
 static int g_failures = 0;
 #define CHECK(cond) do { \
@@ -27,10 +37,15 @@ static char g_test_dir[1024];
 static void make_test_dir(void)
 {
 #ifdef _WIN32
-    const char *base = getenv("TEMP");
-    snprintf(g_test_dir, sizeof g_test_dir, "%s\\caro_test_%lu",
-             base ? base : ".", (unsigned long)time(NULL) ^ (unsigned long)clock());
-    _mkdir(g_test_dir);
+    char tmp[MAX_PATH];
+    DWORD n = GetTempPathA(sizeof tmp, tmp);
+    if (n == 0 || n >= sizeof tmp) strcpy(tmp, ".\\");
+    snprintf(g_test_dir, sizeof g_test_dir, "%scaro_test_%lu_%lu", tmp,
+             (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
+    if (_mkdir(g_test_dir) != 0) {
+        fprintf(stderr, "mkdir failed\n");
+        exit(1);
+    }
 #else
     const char *base = getenv("TMPDIR");
     snprintf(g_test_dir, sizeof g_test_dir, "%s/caro_test_XXXXXX", base && *base ? base : "/tmp");
@@ -98,14 +113,44 @@ static void write_slot(int slot, int board_n, int status, int reason, int winner
     f = fopen(p, "wb");
     CHECK(f != NULL);
     if (!f) return;
-    fprintf(f, "CARO-SAVE 1\nmode=0\ndiff=1\nboard=%d\nblock=0\n"
+    fprintf(f, "CARO-SAVE 2\nmode=0\ndiff=1\nboard=%d\nblock=0\n"
                "p1name=Fireboy\np1avatar=0\np2name=Watergirl\np2avatar=1\n"
                "ai=1\nturn=%d\nclock1=500\nclock2=480\nstart=1700000000\nelapsed=20\n"
-               "status=%d\nreason=%d\nwinner=%d\nsaved=%lld\n",
-            board_n, turn, status, reason, winner, saved_at);
+               "status=%d\nreason=%d\nwinner=%d\nsaved=%lld\nmoves=%d\n",
+            board_n, turn, status, reason, winner, saved_at, nmoves);
     for (i = 0; i < nmoves; i++)
         fprintf(f, "move=%d,%d\n", mv[i][0], mv[i][1]);
+    fprintf(f, "end=1\n");
     fclose(f);
+}
+
+/* Read the on-disk bytes of `slot` (save files contain no NULs). Returns the length. */
+static size_t read_slot_bytes(int slot, char *buf, size_t cap)
+{
+    char name[32], p[1200];
+    FILE *f;
+    size_t n;
+    snprintf(name, sizeof name, "slot%02d.sav", slot + 1);
+    path_of(p, sizeof p, name);
+    f = fopen(p, "rb");
+    if (!f) return 0;
+    n = fread(buf, 1, cap - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    return n;
+}
+
+static void write_bytes(const char *name, const char *buf, size_t len)
+{
+    char p[1200];
+    FILE *f;
+    path_of(p, sizeof p, name);
+    f = fopen(p, "wb");
+    CHECK(f != NULL);
+    if (f) {
+        fwrite(buf, 1, len, f);
+        fclose(f);
+    }
 }
 
 static void make_game(Game *g, GameMode mode, bool block, int board_n, int nmoves, const int mv[][2])
@@ -288,6 +333,13 @@ static void test_game_roundtrip(void)
     CHECK(h.win_line.cells[0].r == 0 && h.win_line.cells[0].c == 0);
 }
 
+/* A complete v2 save body (everything after the magic line), two moves, valid names. */
+#define V2_HEAD "CARO-SAVE 2\nmode=0\ndiff=1\nboard=10\nblock=0\n"
+#define V2_TAIL \
+    "p1avatar=0\np2name=Watergirl\np2avatar=1\nai=1\nturn=0\nclock1=500\nclock2=480\n" \
+    "start=1700000000\nelapsed=20\nstatus=0\nreason=0\nwinner=-1\nsaved=1000\n" \
+    "moves=2\nmove=0,0\nmove=1,0\nend=1\n"
+
 static void test_corrupt_save(void)
 {
     Game g;
@@ -306,23 +358,124 @@ static void test_corrupt_save(void)
     CHECK(g.move_count == 0x5A5A5A5A); /* *g untouched on failure */
 
     /* header only (truncated) */
-    write_named("slot01.sav", "CARO-SAVE 1\nmode=0\n");
+    write_named("slot01.sav", "CARO-SAVE 2\nmode=0\n");
     CHECK(!storage_load_game(0, &g));
 
-    /* bad field value */
-    write_named("slot01.sav",
-                "CARO-SAVE 1\nmode=7\ndiff=1\nboard=10\nblock=0\np1name=A\np1avatar=0\n"
-                "p2name=B\np2avatar=1\nai=1\nturn=0\nclock1=1\nclock2=1\nstart=1\nelapsed=0\n"
-                "status=0\nreason=0\nwinner=-1\nsaved=1\n");
+    /* bad field value (otherwise complete) */
+    write_named("slot01.sav", "CARO-SAVE 2\nmode=7\ndiff=1\nboard=10\nblock=0\np1name=A\n"
+                              "p1avatar=0\np2name=B\np2avatar=1\nai=1\nturn=0\nclock1=1\n"
+                              "clock2=1\nstart=1\nelapsed=0\nstatus=0\nreason=0\nwinner=-1\n"
+                              "saved=1\nmoves=0\nend=1\n");
     CHECK(!storage_load_game(0, &g));
 
     /* a file with a bad header but otherwise valid content */
-    write_named("slot01.sav", "CARO-SAVE 2\nmode=0\n");
+    write_named("slot01.sav", "CARO-SAVE 3\nmode=0\n");
     CHECK(!storage_load_game(0, &g));
 
     storage_list_slots(info);
     CHECK(!info[0].used);
     CHECK(info[0].move_count == 0 && info[0].saved_at == 0);
+}
+
+/* Format v2 is the only accepted format; v1 files (no moves/end) are treated as unused. */
+static void test_save_format_v1_rejected(void)
+{
+    Game g;
+    SlotInfo info[SAVE_SLOTS];
+
+    write_named("slot01.sav",
+                "CARO-SAVE 1\nmode=0\ndiff=1\nboard=10\nblock=0\np1name=Fireboy\np1avatar=0\n"
+                "p2name=Watergirl\np2avatar=1\nai=1\nturn=0\nclock1=500\nclock2=480\n"
+                "start=1700000000\nelapsed=20\nstatus=0\nreason=0\nwinner=-1\nsaved=1000\n"
+                "move=0,0\nmove=1,0\n");
+    CHECK(!storage_load_game(0, &g));
+    storage_list_slots(info);
+    CHECK(!info[0].used);
+    CHECK(storage_first_free_slot() == 0);
+}
+
+/* Truncation and tampering: a save is accepted only when complete and consistent. */
+static void test_truncated_and_padded_saves(void)
+{
+    Game g;
+    static const int moves2[2][2] = { {0,0},{1,0} };
+    char buf[4096];
+    size_t len, k;
+
+    /* the reference body is itself valid */
+    write_named("slot01.sav", V2_HEAD "p1name=Fireboy\n" V2_TAIL);
+    CHECK(storage_load_game(0, &g));
+    CHECK(g.move_count == 2);
+
+    /* every proper prefix of a real file is refused (dropping only the final newline
+     * still leaves a complete file, so that case is not checked) */
+    write_slot(0, 10, GS_PLAYING, END_NONE, -1, 0, moves2, 2, 1000);
+    len = read_slot_bytes(0, buf, sizeof buf);
+    CHECK(len > 0);
+    for (k = 0; k + 1 < len; k++) {
+        write_bytes("slot01.sav", buf, k);
+        memset(&g, 0x5A, sizeof g);
+        if (storage_load_game(0, &g)) {
+            fprintf(stderr, "truncated at %lu accepted\n", (unsigned long)k);
+            CHECK(0);
+        }
+    }
+    write_bytes("slot01.sav", buf, len);
+    CHECK(storage_load_game(0, &g));
+
+    /* missing end marker, wrong end value, or anything after it */
+    write_named("slot01.sav", V2_HEAD "p1name=Fireboy\np1avatar=0\np2name=Watergirl\n"
+                              "p2avatar=1\nai=1\nturn=0\nclock1=500\nclock2=480\n"
+                              "start=1700000000\nelapsed=20\nstatus=0\nreason=0\n"
+                              "winner=-1\nsaved=1000\nmoves=2\nmove=0,0\nmove=1,0\n");
+    CHECK(!storage_load_game(0, &g));
+    write_named("slot01.sav", V2_HEAD "p1name=Fireboy\np1avatar=0\np2name=Watergirl\n"
+                              "p2avatar=1\nai=1\nturn=0\nclock1=500\nclock2=480\n"
+                              "start=1700000000\nelapsed=20\nstatus=0\nreason=0\n"
+                              "winner=-1\nsaved=1000\nmoves=2\nmove=0,0\nmove=1,0\nend=0\n");
+    CHECK(!storage_load_game(0, &g));
+    write_named("slot01.sav", V2_HEAD "p1name=Fireboy\np1avatar=0\np2name=Watergirl\n"
+                              "p2avatar=1\nai=1\nturn=0\nclock1=500\nclock2=480\n"
+                              "start=1700000000\nelapsed=20\nstatus=0\nreason=0\n"
+                              "winner=-1\nsaved=1000\nmoves=2\nmove=0,0\nmove=1,0\nend=1\n"
+                              "move=2,0\n");
+    CHECK(!storage_load_game(0, &g));
+
+    /* declared count differs from the move lines present (either direction) */
+    write_named("slot01.sav", V2_HEAD "p1name=Fireboy\np1avatar=0\np2name=Watergirl\n"
+                              "p2avatar=1\nai=1\nturn=0\nclock1=500\nclock2=480\n"
+                              "start=1700000000\nelapsed=20\nstatus=0\nreason=0\n"
+                              "winner=-1\nsaved=1000\nmoves=3\nmove=0,0\nmove=1,0\nend=1\n");
+    CHECK(!storage_load_game(0, &g));
+    write_named("slot01.sav", V2_HEAD "p1name=Fireboy\np1avatar=0\np2name=Watergirl\n"
+                              "p2avatar=1\nai=1\nturn=0\nclock1=500\nclock2=480\n"
+                              "start=1700000000\nelapsed=20\nstatus=0\nreason=0\n"
+                              "winner=-1\nsaved=1000\nmoves=1\nmove=0,0\nmove=1,0\nend=1\n");
+    CHECK(!storage_load_game(0, &g));
+}
+
+/* Player names: empty is refused, and %00 (an embedded NUL) is refused. */
+static void test_bad_player_names(void)
+{
+    Game g;
+
+    write_named("slot01.sav", V2_HEAD "p1name=\n" V2_TAIL);
+    CHECK(!storage_load_game(0, &g));
+    write_named("slot01.sav", V2_HEAD "p1name=Fireboy\np1avatar=0\np2name=\np2avatar=1\n"
+                              "ai=1\nturn=0\nclock1=500\nclock2=480\nstart=1700000000\n"
+                              "elapsed=20\nstatus=0\nreason=0\nwinner=-1\nsaved=1000\n"
+                              "moves=2\nmove=0,0\nmove=1,0\nend=1\n");
+    CHECK(!storage_load_game(0, &g));
+    write_named("slot01.sav", V2_HEAD "p1name=A%00B\n" V2_TAIL);
+    CHECK(!storage_load_game(0, &g));
+    write_named("slot01.sav", V2_HEAD "p1name=Fire%00\n" V2_TAIL);
+    CHECK(!storage_load_game(0, &g));
+    write_named("slot01.sav", V2_HEAD "p1name=Fireboy\n" V2_TAIL);
+    CHECK(storage_load_game(0, &g));
+    CHECK(strcmp(g.players[0].name, "Fireboy") == 0);
+    write_named("slot01.sav", V2_HEAD "p1name=Fire%20boy\n" V2_TAIL);
+    CHECK(storage_load_game(0, &g));
+    CHECK(strcmp(g.players[0].name, "Fire boy") == 0);
 }
 
 static void test_illegal_moves(void)
@@ -438,6 +591,98 @@ static void test_slot_selection(void)
     CHECK(!storage_delete_slot(-1));
 }
 
+/* Saves made within the same second must still order strictly (latest / autosave). */
+static void test_save_ordering(void)
+{
+    static const int ok[2][2] = { {0,0},{1,0} };
+    SlotInfo info[SAVE_SLOTS];
+    Game g;
+    int64_t prev = 0;
+    int i;
+
+    make_game(&g, MODE_PVE, false, 10, 2, ok);
+    for (i = 0; i < 5; i++) CHECK(storage_save_game(i, &g));
+    storage_list_slots(info);
+    for (i = 0; i < 5; i++) {
+        CHECK(info[i].used);
+        CHECK(info[i].saved_at > prev);
+        prev = info[i].saved_at;
+    }
+    CHECK(storage_latest_slot() == 4);
+
+    /* re-saving an older slot makes it the latest, even within the same second */
+    CHECK(storage_save_game(1, &g));
+    CHECK(storage_latest_slot() == 1);
+
+    /* all slots full: autosave overwrites the oldest, which is slot 0 */
+    for (i = 5; i < SAVE_SLOTS; i++) CHECK(storage_save_game(i, &g));
+    CHECK(storage_first_free_slot() == -1);
+    CHECK(storage_autosave_slot() == 0);
+    CHECK(storage_latest_slot() == SAVE_SLOTS - 1);
+}
+
+#ifndef _WIN32
+static void set_mtime(int slot, time_t t)
+{
+    char name[32], p[1200];
+    struct utimbuf ub;
+    snprintf(name, sizeof name, "slot%02d.sav", slot + 1);
+    path_of(p, sizeof p, name);
+    ub.actime = t;
+    ub.modtime = t;
+    CHECK(utime(p, &ub) == 0);
+}
+#endif
+
+/* Equal saved_at (hand-made files): the most recently written file wins; equal mtimes
+ * fall back to the lower slot index. */
+static void test_latest_tie_break(void)
+{
+#ifndef _WIN32
+    static const int ok[2][2] = { {0,0},{1,0} };
+    write_slot(0, 10, GS_PLAYING, END_NONE, -1, 0, ok, 2, 500);
+    write_slot(1, 10, GS_PLAYING, END_NONE, -1, 0, ok, 2, 500);
+    set_mtime(0, 1000);
+    set_mtime(1, 2000);
+    CHECK(storage_latest_slot() == 1);
+    set_mtime(0, 3000);
+    CHECK(storage_latest_slot() == 0);
+    set_mtime(0, 2000);
+    CHECK(storage_latest_slot() == 0);
+#endif
+}
+
+/* Saving during the AFK prompt or with an undo request pending is allowed; the loaded game
+ * has AFK reset and no undo pending. */
+static void test_save_during_afk_and_undo(void)
+{
+    static const int moves2[2][2] = { {0,0},{1,0} };
+    Game g, h;
+
+    make_game(&g, MODE_PVP, false, 10, 2, moves2);
+    g.afk = AFK_PROMPT;
+    g.afk_left = 7.0;
+    g.idle = 130.0;
+    g.undo_requester = 1;
+    CHECK(storage_save_game(5, &g));
+    memset(&h, 0x5A, sizeof h);
+    CHECK(storage_load_game(5, &h));
+    CHECK(h.afk == AFK_NONE && h.afk_left == 0.0 && h.idle == 0.0);
+    CHECK(h.undo_requester == -1);
+    CHECK(h.move_count == 2 && h.turn == g.turn && h.status == GS_PLAYING);
+
+    /* the AFK timeout state is also saved and comes back as a normal, resumable game */
+    make_game(&g, MODE_PVE, false, 10, 2, moves2);
+    g.afk = AFK_TIMEOUT;
+    g.afk_left = 0.0;
+    g.idle = 200.0;
+    CHECK(storage_save_game(6, &g));
+    memset(&h, 0x5A, sizeof h);
+    CHECK(storage_load_game(6, &h));
+    CHECK(h.afk == AFK_NONE && h.idle == 0.0 && h.undo_requester == -1);
+    CHECK(h.status == GS_PLAYING && h.move_count == 2);
+}
+
 static void test_storage_dir(void)
 {
     storage_set_dir("/some/where");
@@ -445,6 +690,25 @@ static void test_storage_dir(void)
     storage_set_dir(NULL);
     CHECK(storage_dir() != NULL && storage_dir()[0] != '\0');
     storage_set_dir(g_test_dir);
+}
+
+/* An over-long CARO_DATA_DIR is ignored: the OS default is used, never the CWD ("caro"). */
+static void test_long_data_dir_env(void)
+{
+#ifndef _WIN32
+    static char longdir[2100];
+    size_t i;
+    longdir[0] = '/';
+    for (i = 1; i < 2000; i++) longdir[i] = 'x';
+    longdir[2000] = '\0';
+    storage_set_dir(NULL);
+    setenv("CARO_DATA_DIR", longdir, 1);
+    CHECK(strcmp(storage_dir(), longdir) != 0);
+    CHECK(strcmp(storage_dir(), "caro") != 0);
+    CHECK(strlen(storage_dir()) < 1000);
+    unsetenv("CARO_DATA_DIR");
+    storage_set_dir(g_test_dir);
+#endif
 }
 
 int main(void)
@@ -468,7 +732,20 @@ int main(void)
     remove_test_files();
     test_slot_selection();
     remove_test_files();
+    test_save_format_v1_rejected();
+    remove_test_files();
+    test_truncated_and_padded_saves();
+    remove_test_files();
+    test_bad_player_names();
+    remove_test_files();
+    test_save_ordering();
+    remove_test_files();
+    test_latest_tie_break();
+    remove_test_files();
+    test_save_during_afk_and_undo();
+    remove_test_files();
     test_storage_dir();
+    test_long_data_dir_env();
 
     cleanup_test_dir();
     if (g_failures) {
