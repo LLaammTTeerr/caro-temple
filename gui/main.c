@@ -3,7 +3,7 @@
  * Test/e2e flags:
  *   --scene home|setup|profile|settings|saves|game|pause|gameover|afk|undo|surrender
  *   --board 3|5|10   --pvp   --frames N (default 45)   --shot out.png (save virtual screen, exit)
- * Env CARO_TRACE=<file>: append "scene N", "overlay N" and "moves N" lines whenever they
+ * Env CARO_TRACE=<file>: append "scene N", "overlay N", "moves N" and "focus N" lines whenever they
  * change (used by the end-to-end tests to assert on what input did).
  */
 #include <stdio.h>
@@ -115,7 +115,7 @@ int main(int argc, char **argv)
 
     FILE *trace = NULL;
     if ((e = getenv("CARO_TRACE")) != NULL) trace = fopen(e, "a");
-    int tr_scene = -1, tr_ovl = -1, tr_moves = -1;
+    int tr_scene = -1, tr_ovl = -1, tr_moves = -1, tr_focus = -1;
 
     int frame = 0;
     while (!WindowShouldClose() && !g_app.quit) {
@@ -176,8 +176,10 @@ int main(int argc, char **argv)
             if (sc != tr_scene) fprintf(trace, "scene %d\n", sc);
             if (ov != tr_ovl) fprintf(trace, "overlay %d\n", ov);
             if (mv != tr_moves) fprintf(trace, "moves %d\n", mv);
-            if (sc != tr_scene || ov != tr_ovl || mv != tr_moves) fflush(trace);
-            tr_scene = sc; tr_ovl = ov; tr_moves = mv;
+            int fo = ui_focus_get();            /* keyboard focus index of the screen */
+            if (fo != tr_focus) fprintf(trace, "focus %d\n", fo);
+            if (sc != tr_scene || ov != tr_ovl || mv != tr_moves || fo != tr_focus) fflush(trace);
+            tr_scene = sc; tr_ovl = ov; tr_moves = mv; tr_focus = fo;
         }
 
         frame++;
