@@ -62,7 +62,9 @@ docs/   DESIGN.md (UI design system and screen specs), mockups
 ## Tests
 - `ctest`: unit tests for rules, AI (Hard never loses 3x3, beats Easy on 10x10, < 300 ms per move), match state (clocks, undo, AFK), saves/settings, strings.
 - `tests/e2e_gui.sh build` (Linux, needs Xvfb and libXtst): drives the real GUI with injected keyboard and mouse input through `tools/xinj.c`. It plays a 2-player match to a win, then a rematch, then pause → save, leave → load, and an AFK autosave, and checks the results. CI runs it on every push.
-- CI matrix (`.github/workflows/ci.yml`): Linux GCC and Clang, macOS Apple Clang, Windows MSVC and MinGW-w64.
+- `tests/e2e_tui.sh build` (Linux/macOS, needs tmux) and `tests/e2e_tui_windows.py` (Windows, through ConPTY with `pywinpty`): play the terminal version with real key input. They cover setup → profile → match vs the computer → pause → Home → Continue → quit.
+- CI matrix (`.github/workflows/ci.yml`): Linux GCC and Clang, macOS Apple Clang, Windows MSVC and MinGW-w64. Unit tests run everywhere, and the terminal end-to-end tests run on Linux, macOS and Windows. The GUI runs headlessly on Linux and on Windows (Mesa software OpenGL), and CI keeps the screenshots as artifacts. GitHub's macOS VMs have no OpenGL GPU, so the macOS GUI only gets built there, not run.
+- Linux terminal gamepad: only devices with at least 4 buttons and 2 axes are used, and axes resting off-centre are ignored. Set `CARO_NO_GAMEPAD=1` to disable gamepad input entirely.
 
 ## Testing hooks
 - `caro --scene <home|setup|profile|settings|saves|game|pause|undo|afk|surrender|gameover> [--board 3|5|10] [--pvp] --shot out.png` renders one scene and saves a screenshot. CI uses it headlessly.
