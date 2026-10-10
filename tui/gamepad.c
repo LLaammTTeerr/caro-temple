@@ -145,6 +145,8 @@ int pad_count(void)
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <linux/joystick.h>
 
@@ -162,7 +164,12 @@ typedef struct {
     int  num;           /* N of /dev/input/jsN */
     bool btn[JS_NBTN];
     int  axis[JS_NAX];
+    bool off_center[JS_NAX]; /* axis rested outside the deadzone at connect: ignore it until it
+                                has been seen centred (some HID devices report idle axes at
+                                -32767, which would otherwise read as a direction held forever) */
 } JsSlot;
+
+static unsigned g_js_rejected;  /* bit j: /dev/input/jsj is not a gamepad, don't reopen it */
 
 static JsSlot g_js[PAD_MAX];
 static double g_js_probe_in = 0.0;
@@ -172,8 +179,15 @@ static void js_apply(JsSlot *s, const struct js_event *e)
     unsigned t = (unsigned)e->type & ~(unsigned)JS_EVENT_INIT;
     if (t == JS_EVENT_BUTTON && e->number < JS_NBTN)
         s->btn[e->number] = e->value != 0;
-    else if (t == JS_EVENT_AXIS && e->number < JS_NAX)
-        s->axis[e->number] = e->value;
+    else if (t == JS_EVENT_AXIS && e->number < JS_NAX) {
+        int v = e->value;
+        if (e->type & JS_EVENT_INIT) {
+            s->off_center[e->number] = v > PAD_DEADZONE / 2 || v < -PAD_DEADZONE / 2;
+        } else if (s->off_center[e->number] && v < PAD_DEADZONE / 2 && v > -PAD_DEADZONE / 2) {
+            s->off_center[e->number] = false;
+        }
+        s->axis[e->number] = s->off_center[e->number] ? 0 : v;
+    }
 }
 
 static PadInput js_input(const JsSlot *s)
@@ -219,14 +233,23 @@ static void js_probe(void)
         if (p >= PAD_MAX) break;
         char path[32];
         snprintf(path, sizeof path, "%s%d", JS_DIR, j);
+        if (j < 32 && (g_js_rejected & (1u << j))) continue;
         int fd = open(path, O_RDONLY | O_NONBLOCK);
         if (fd < 0) continue;
+        /* Only gamepad-like devices: an Xbox pad has 11 buttons and 8 axes. Other joystick
+         * nodes (accelerometers, HID oddities on VMs) are skipped for good. */
+        unsigned char nbtn = 0, nax = 0;
+        if (ioctl(fd, JSIOCGBUTTONS, &nbtn) < 0 || ioctl(fd, JSIOCGAXES, &nax) < 0 || nbtn < 4 || nax < 2) {
+            close(fd);
+            if (j < 32) g_js_rejected |= 1u << j;
+            continue;
+        }
         JsSlot *s = &g_js[p];
         s->open = true;
         s->fd = fd;
         s->num = j;
         for (int i = 0; i < JS_NBTN; i++) s->btn[i] = false;
-        for (int i = 0; i < JS_NAX; i++) s->axis[i] = 0;
+        for (int i = 0; i < JS_NAX; i++) { s->axis[i] = 0; s->off_center[i] = false; }
     }
 }
 
@@ -256,6 +279,11 @@ bool pad_init(void)
         js_close(p);
     }
     g_js_probe_in = 0.0;
+    g_js_rejected = 0;
+    if (getenv("CARO_NO_GAMEPAD")) {   /* opt-out: never open any device */
+        g_js_rejected = ~0u;
+        g_js_probe_in = 1e300;
+    }
     return true;
 }
 
