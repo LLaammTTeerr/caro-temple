@@ -1,5 +1,7 @@
 # Caro Temple
 
+[![CI](https://github.com/LLaammTTeerr/caro-temple/actions/workflows/ci.yml/badge.svg)](https://github.com/LLaammTTeerr/caro-temple/actions/workflows/ci.yml)
+
 A pixel-art Caro (Gomoku / tic-tac-toe) game in C with a temple theme: **Fire (X) vs Water (O)**.
 
 ![Home](docs/mockups/screenshot_home.png)
@@ -15,11 +17,12 @@ Two versions share one game core:
 - Boards **3x3** (3 in a row), **5x5** and **10x10** (5 in a row), each with its own temple background (Fire Shrine, Forest Temple, Water Sanctum). Optional rule: a five blocked at both ends does not win.
 - **vs Computer** (Easy / Medium / Hard; Hard plays 3x3 perfectly) and **2 players** on one device.
 - Player name and avatar (six pixel mascots) before each match.
-- Mouse, keyboard and Xbox-style gamepad:
+- Mouse (hover + click), keyboard and Xbox-style gamepad:
   - **Player 1:** `W A S D` + `Space`
   - **Player 2:** arrow keys + `Enter`
-  - **Menus:** `Esc` goes back, `Home` / gamepad Start goes to the main menu
-  - **Gamepad:** D-pad moves, A places, B goes back
+  - **Menus:** `Esc` goes back; the on-screen Home button, the `Home` key or gamepad Start goes to the main menu (during a match it asks first, so a stray press doesn't abandon the game)
+  - **Gamepad:** D-pad / left stick moves, A places, B goes back; two pads give each player their own
+  - **Gamepad support by version:** the GUI version supports gamepads everywhere raylib does. The terminal version supports them on Linux (joystick API) and Windows (XInput, loaded at runtime), but not on macOS.
 - HUD with the match start time, a 10-minute clock per player, and the opponent's last move highlighted.
 - Surrender, plus undo that the opponent has to accept (vs Computer, the AI always accepts).
 - 10 save slots.
@@ -55,6 +58,11 @@ tui/    terminal frontend: double-buffered ANSI renderer, SGR mouse, Win32 conso
 tests/  unit tests for the core (ctest)
 docs/   DESIGN.md (UI design system and screen specs), mockups
 ```
+
+## Tests
+- `ctest`: unit tests for rules, AI (Hard never loses 3x3, beats Easy on 10x10, < 300 ms per move), match state (clocks, undo, AFK), saves/settings, strings.
+- `tests/e2e_gui.sh build` (Linux, needs Xvfb and libXtst): drives the real GUI with injected keyboard and mouse input through `tools/xinj.c`. It plays a 2-player match to a win, then a rematch, then pause → save, leave → load, and an AFK autosave, and checks the results. CI runs it on every push.
+- CI matrix (`.github/workflows/ci.yml`): Linux GCC and Clang, macOS Apple Clang, Windows MSVC and MinGW-w64.
 
 ## Testing hooks
 - `caro --scene <home|setup|profile|settings|saves|game|pause|undo|afk|surrender|gameover> [--board 3|5|10] [--pvp] --shot out.png` renders one scene and saves a screenshot. CI uses it headlessly.

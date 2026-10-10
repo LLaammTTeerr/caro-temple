@@ -72,6 +72,9 @@ sleep 900
 K
 [ -f "$WORK/data/slot03.sav" ] || fail "manual save to slot 3 missing"
 grep -q '^end=1' "$WORK/data/slot03.sav" || fail "slot 3 save incomplete"
+# Step 1 must have ended in a win: only then does Enter start a rematch, leaving exactly the
+# one move played in step 2 (otherwise the first match would have continued with 6+ moves).
+grep -q '^moves=1$' "$WORK/data/slot03.sav" || fail "step 1 did not finish with a win (rematch not started)"
 
 echo "== 3. Leave -> Home -> Load Game -> slot 3"
 inj <<'K'
