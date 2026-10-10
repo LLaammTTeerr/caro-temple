@@ -564,6 +564,15 @@ void tui_game_event(const TermEvent *ev)
     if (ev->type != TEV_KEY) return;
     game_activity(g);
     if (popup != POP_NONE) {
+        /* PRD: Home / gamepad Start goes to the main screen from anywhere in a match, popups
+         * included - except the AFK prompt, which must be answered with "Yes". After game over
+         * the match is dropped, otherwise it stays in memory for Continue. */
+        if (ev->key == TK_HOME && popup != POP_AFK) {
+            if (g->status == GS_OVER) g_tui.has_game = false;
+            popup = POP_NONE;
+            tui_goto(TS_HOME);
+            return;
+        }
         int cols, rows;
         term_size(&cols, &rows);
         popup_build(cols, rows);

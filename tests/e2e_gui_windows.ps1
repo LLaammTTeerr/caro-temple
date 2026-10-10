@@ -63,9 +63,18 @@ function Start-Caro([string]$name, [string]$cargs) {
     $sp = @{ FilePath = (Join-Path $Dir "caro.exe"); WorkingDirectory = $Dir; PassThru = $true }
     if ($cargs) { $sp.ArgumentList = $cargs }
     $script:proc = Start-Process @sp
-    Wait 4000
-    $script:hwnd = [Inj]::FindWindow($null, "Caro Temple")
-    if ($script:hwnd -eq [IntPtr]::Zero) { Fail "window not found" }
+    $script:hwnd = [IntPtr]::Zero
+    for ($i = 0; $i -lt 120 -and $script:hwnd -eq [IntPtr]::Zero; $i++) {
+        Start-Sleep -Milliseconds 250
+        if ($script:proc.HasExited) { Fail "caro.exe exited with code $($script:proc.ExitCode) before showing a window" }
+        $script:hwnd = $script:proc.MainWindowHandle; $script:proc.Refresh()
+        if ($script:hwnd -eq [IntPtr]::Zero) { $script:hwnd = [Inj]::FindWindow($null, "Caro Temple") }
+    }
+    if ($script:hwnd -eq [IntPtr]::Zero) { Fail "window not found after 30 s" }
+    Write-Host "window found"
+    # wait for the first frame (trace) and let the window settle before typing
+    for ($i = 0; $i -lt 60; $i++) { if ((Get-Content $script:trace -ErrorAction SilentlyContinue) -contains "scene 0") { break }; Start-Sleep -Milliseconds 250 }
+    Wait 1500
     [void][Inj]::SetForegroundWindow($script:hwnd)
     Wait 500
 }

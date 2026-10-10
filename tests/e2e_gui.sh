@@ -15,26 +15,46 @@ cleanup() { [ -n "$GPID" ] && kill "$GPID" 2>/dev/null || true; kill "$XPID" 2>/
 trap cleanup EXIT
 sleep 1
 inj() { DISPLAY=$DISP "$WORK/xinj"; }
+TRACE="$WORK/trace.txt"
 start_game() { # extra env as args
-  (cd "$BUILD" && env DISPLAY=$DISP CARO_DATA_DIR="$WORK/data" "$@" ./caro >"$WORK/game.log" 2>&1) & GPID=$!
-  sleep $(( 2 * ${XINJ_SCALE:-1} ))
+  : > "$TRACE"
+  (cd "$BUILD" && env DISPLAY=$DISP CARO_DATA_DIR="$WORK/data" CARO_TRACE="$TRACE" "$@" ./caro >"$WORK/game.log" 2>&1) & GPID=$!
+  MARK=0; waitfor "scene 0" "game window up"
+  sleep $(( 1 * ${XINJ_SCALE:-1} ))   # let the window map and take keyboard focus
 }
-fail() { echo "E2E FAIL: $*"; ls -la "$WORK" "$WORK/data" 2>/dev/null; exit 1; }
+fail() { echo "E2E FAIL: $*"; echo "--- trace"; cat "$TRACE"; ls -la "$WORK/data" 2>/dev/null; exit 1; }
+# waitfor <exact trace line> <what>: the line must appear after the last mark (up to ~15 s)
+MARK=0
+mark() { MARK=$(wc -l < "$TRACE"); }
+waitfor() {
+  for _ in $(seq 1 60); do
+    if tail -n +$((MARK + 1)) "$TRACE" | grep -qx "$1"; then
+      echo "ok: $2"
+      # a new screen animates its widgets in (slide/fade); give it time before the next input
+      case "$1" in scene*|overlay*) sleep "$(awk "BEGIN{print 0.6*${XINJ_SCALE:-1}}")";; esac
+      return 0
+    fi
+    sleep 0.25
+  done
+  fail "$2 (waited for '$1')"
+}
 
 echo "== 1. Home -> New Game (PvP 3x3, keyboard) -> Profile -> Start -> X wins by keyboard"
 start_game CARO_AFK_IDLE=600
+mark; echo "key Return" | inj; waitfor "scene 1" "Enter on Play opens New Game"
+mark
 inj <<'K'
-key Return
-sleep 700
 key Right
 key Return
 key Down
 key Return
-sleep 200
+sleep 300
 click 895 620
-sleep 800
-click 756 641
-sleep 900
+K
+waitfor "scene 2" "Next opens the profile screen"
+mark; echo "click 756 641" | inj; waitfor "scene 5" "Start begins the match"
+mark
+inj <<'K'
 move 1200 100
 key space
 sleep 200
@@ -52,24 +72,17 @@ sleep 200
 key s
 key s
 key space
-sleep 2000
-sleep 10
 K
+waitfor "overlay 6" "X won by keyboard, game-over popup"
 kill -0 $GPID || fail "game exited during match"
 
 echo "== 2. Rematch (Enter) -> Esc pause -> Save Game -> slot 3"
-inj <<'K'
-key Return
-sleep 900
-key space
-sleep 300
-key Escape
-sleep 500
-click 640 281
-sleep 900
-click 356 280
-sleep 900
-K
+mark; echo "key Return" | inj; waitfor "moves 0" "Enter on Rematch starts a new match"
+sleep $(( 1 * ${XINJ_SCALE:-1} ))   # rematch fades game -> game (same scene id): let it finish
+mark; echo "key space" | inj; waitfor "moves 1" "placed a stone"
+mark; echo "key Escape" | inj; waitfor "overlay 1" "Esc opens Pause"
+mark; echo "click 640 281" | inj; waitfor "scene 4" "Save Game opens the slots"
+mark; echo "click 356 280" | inj; waitfor "scene 5" "saving returns to the match"
 [ -f "$WORK/data/slot03.sav" ] || fail "manual save to slot 3 missing"
 grep -q '^end=1' "$WORK/data/slot03.sav" || fail "slot 3 save incomplete"
 # Step 1 must have ended in a win: only then does Enter start a rematch, leaving exactly the
@@ -77,31 +90,20 @@ grep -q '^end=1' "$WORK/data/slot03.sav" || fail "slot 3 save incomplete"
 grep -q '^moves=1$' "$WORK/data/slot03.sav" || fail "step 1 did not finish with a win (rematch not started)"
 
 echo "== 3. Pause Home -> main screen (no confirm) -> Load Game -> slot 3"
-inj <<'K'
-click 648 576
-sleep 900
-click 640 459
-sleep 900
-click 356 280
-sleep 900
-K
+mark; echo "click 648 576" | inj; waitfor "scene 0" "pause Home goes to the main screen"
+mark; echo "click 640 459" | inj; waitfor "scene 4" "Load Game opens the slots"
+mark; echo "click 356 280" | inj; waitfor "scene 5" "loading slot 3 resumes the match"
 kill -0 $GPID || fail "game exited after load"
 kill $GPID; GPID=; sleep 0.5
 
 echo "== 4. AFK: prompt then autosave + Home"
 rm -f "$WORK/data/slot0"*.sav
 start_game CARO_AFK_IDLE=3 CARO_AFK_GRACE=3
-inj <<'K'
-key Return
-sleep 600
-click 895 620
-sleep 600
-click 756 641
-sleep 800
-move 1200 100
-key space
-sleep 8000
-K
+mark; echo "key Return" | inj; waitfor "scene 1" "New Game"
+mark; echo "click 895 620" | inj; waitfor "scene 2" "Profile"
+mark; echo "click 756 641" | inj; waitfor "scene 5" "match"
+mark; printf 'move 1200 100\nkey space\n' | inj; waitfor "overlay 5" "AFK prompt after 3 s idle"
+waitfor "scene 0" "no answer: back to the main screen"
 ls "$WORK/data"/slot*.sav >/dev/null 2>&1 || fail "AFK autosave missing"
 kill -0 $GPID || fail "game exited after AFK"
 echo "E2E GUI: all checks passed"
