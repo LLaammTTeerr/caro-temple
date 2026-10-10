@@ -64,6 +64,7 @@ int main(int argc, char **argv)
     settings_load(&g_app.settings);
     i18n_set_lang(g_app.settings.lang);
 
+    SetTraceLogLevel(LOG_WARNING);
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
     InitWindow(VIRTUAL_W, VIRTUAL_H, "Caro Temple");
     SetWindowMinSize(640, 360);

@@ -66,8 +66,8 @@ bool game_play(Game *g, int r, int c);
 /* Note: game_play resets idle (and afk prompt state is untouched) only for HUMAN moves;
  * AI moves (game_is_ai_turn() true before the call) do not reset idle.
  *
- * Advance time by dt seconds. If clocks_running and status PLAYING and no undo pending,
- * the current player's clock decreases; at 0 -> END_TIMEOUT, opponent wins.
+ * Advance time by dt seconds. If clocks_running and status PLAYING and no undo pending and
+ * no AFK prompt/timeout (the prompt is a pause), the current player's clock decreases; at 0 -> END_TIMEOUT, opponent wins.
  * AFK tracking runs whenever status PLAYING (even when clocks paused):
  * idle += dt; idle >= game_afk_idle_s -> AFK_PROMPT with afk_left = game_afk_grace_s;
  * in AFK_PROMPT afk_left -= dt; <= 0 -> AFK_TIMEOUT (frontend autosaves + goes Home). */
