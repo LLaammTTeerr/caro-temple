@@ -52,8 +52,10 @@
 #define Q_CAP 64
 #define SENTINEL_CP 0xFFFFFFFFu /* front-buffer marker: never equal to a sanitised cell */
 
-#define ENTER_SEQ "\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?7l\x1b[0m\x1b[2J\x1b[H"
-#define RESTORE_SEQ "\x1b[0m\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?7h\x1b[?1049l"
+/* 1000 = button press/release, 1003 = any-motion (hover, also reports moves without a button),
+ * 1006 = SGR coordinates. */
+#define ENTER_SEQ "\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1003h\x1b[?1006h\x1b[?7l\x1b[0m\x1b[2J\x1b[H"
+#define RESTORE_SEQ "\x1b[0m\x1b[?1006l\x1b[?1003l\x1b[?1000l\x1b[?25h\x1b[?7h\x1b[?1049l"
 
 typedef struct {
     uint32_t cp;
@@ -93,6 +95,15 @@ static void parse_input(bool final);              /* defined below, used by plat
 
 static void q_push(const TermEvent *e)
 {
+    /* Hover (any-motion) reports can arrive in bursts: consecutive moves collapse into the
+     * newest one so they can never push a click or key out of the full queue. */
+    if (e->type == TEV_MOUSE && e->mkind == TM_MOVE && g_q_count > 0) {
+        TermEvent *last = &g_q[(g_q_head + g_q_count - 1) % Q_CAP];
+        if (last->type == TEV_MOUSE && last->mkind == TM_MOVE) {
+            *last = *e;
+            return;
+        }
+    }
     if (g_q_count >= Q_CAP) return;               /* drop newest when full */
     g_q[(g_q_head + g_q_count) % Q_CAP] = *e;
     g_q_count++;
@@ -351,6 +362,8 @@ static bool plat_open(void)
     if (g_hout == NULL || g_hout == INVALID_HANDLE_VALUE) return false;
     if (!GetConsoleMode(g_hin, &g_orig_in_mode)) return false;
     if (!GetConsoleMode(g_hout, &g_orig_out_mode)) return false;
+    g_win_buttons = 0;
+    g_win_hi = 0;
 
     in_mode = (g_orig_in_mode | ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS
                | ENABLE_PROCESSED_INPUT)
@@ -456,12 +469,28 @@ static void win_handle_record(const INPUT_RECORD *r)
     case MOUSE_EVENT: {
         const MOUSE_EVENT_RECORD *m = &r->Event.MouseEvent;
         CONSOLE_SCREEN_BUFFER_INFO csbi;
-        int ox = 0, oy = 0, mx, my;
-        DWORD st = m->dwButtonState & (FROM_LEFT_1ST_BUTTON_PRESSED | FROM_LEFT_2ND_BUTTON_PRESSED
-                                       | RIGHTMOST_BUTTON_PRESSED);
+        int ox = 0, oy = 0, mx, my, b;
+        DWORD st;
         static const DWORD bits[3] = { FROM_LEFT_1ST_BUTTON_PRESSED, FROM_LEFT_2ND_BUTTON_PRESSED,
                                        RIGHTMOST_BUTTON_PRESSED };
-        int b;
+        if (m->dwEventFlags & MOUSE_WHEELED) {
+            /* wheel: the high word of dwButtonState is the signed delta; buttons unchanged */
+            short delta = (short)HIWORD(m->dwButtonState);
+            if (GetConsoleScreenBufferInfo(g_hout, &csbi)) {
+                mx = m->dwMousePosition.X - csbi.srWindow.Left;
+                my = m->dwMousePosition.Y - csbi.srWindow.Top;
+            } else {
+                mx = m->dwMousePosition.X;
+                my = m->dwMousePosition.Y;
+            }
+            if (mx < 0) mx = 0;
+            if (my < 0) my = 0;
+            push_mouse(delta > 0 ? TM_WHEEL_UP : TM_WHEEL_DOWN, 0, mx, my);
+            return;
+        }
+        if (m->dwEventFlags & MOUSE_HWHEELED) return;
+        st = m->dwButtonState & (FROM_LEFT_1ST_BUTTON_PRESSED | FROM_LEFT_2ND_BUTTON_PRESSED
+                                 | RIGHTMOST_BUTTON_PRESSED);
         if (GetConsoleScreenBufferInfo(g_hout, &csbi)) {
             ox = csbi.srWindow.Left;
             oy = csbi.srWindow.Top;
@@ -470,18 +499,12 @@ static void win_handle_record(const INPUT_RECORD *r)
         my = m->dwMousePosition.Y - oy;
         if (mx < 0) mx = 0;
         if (my < 0) my = 0;
-        if (m->dwEventFlags & MOUSE_WHEELED) {
-            short delta = (short)HIWORD(m->dwButtonState);
-            push_mouse(delta > 0 ? TM_WHEEL_UP : TM_WHEEL_DOWN, 0, mx, my);
-        } else if (m->dwEventFlags & MOUSE_MOVED) {
-            push_mouse(TM_MOVE, 0, mx, my);
-        } else if (m->dwEventFlags == 0 || (m->dwEventFlags & DOUBLE_CLICK)) {
-            for (b = 0; b < 3; b++) {
-                if ((st & bits[b]) != (g_win_buttons & bits[b])) {
-                    push_mouse((st & bits[b]) ? TM_PRESS : TM_RELEASE, b, mx, my);
-                }
-            }
+        /* button transitions are checked on every record (a release can ride on a move) */
+        for (b = 0; b < 3; b++) {
+            if ((st & bits[b]) != (g_win_buttons & bits[b]))
+                push_mouse((st & bits[b]) ? TM_PRESS : TM_RELEASE, b, mx, my);
         }
+        if (m->dwEventFlags & MOUSE_MOVED) push_mouse(TM_MOVE, 0, mx, my);
         g_win_buttons = st;
         return;
     }
