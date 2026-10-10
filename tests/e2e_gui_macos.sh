@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# End-to-end test of the GUI version on macOS: real key events through System Events
-# (osascript), assertions through the CARO_TRACE log. Usage: tests/e2e_gui_macos.sh <build-dir>
+# End-to-end test of the GUI version on macOS: real Quartz key events (tools/macinj.c posts them
+# to the game process), assertions through the CARO_TRACE log. Usage: tests/e2e_gui_macos.sh <build-dir>
 set -euo pipefail
 BUILD=$(cd "${1:-build}" && pwd)
 WORK=$(mktemp -d)
 S=${XINJ_SCALE:-1}
 TRACE="$WORK/trace.txt"
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cc -O1 -o "$WORK/macinj" "$ROOT/tools/macinj.c" -framework ApplicationServices
 MARK=0
 GPID=
 cleanup() { [ -n "$GPID" ] && kill "$GPID" 2>/dev/null || true; }
@@ -24,8 +26,8 @@ waitfor() {
   fail "$2 (waited for '$1')"
 }
 # key codes: Return 36, Escape 53, Space 49, Left 123, Right 124, Down 125, Up 126, Home 115
-front() { osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $GPID) to true" >/dev/null; }
-key() { for k in "$@"; do osascript -e "tell application \"System Events\" to key code $k" >/dev/null; sleep "$(awk "BEGIN{print 0.25*$S}")"; done; }
+front() { osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $GPID) to true" >/dev/null 2>&1 || true; }
+key() { "$WORK/macinj" "$GPID" "$@"; sleep "$(awk "BEGIN{print 0.25*$S}")"; }
 start_game() {
   : > "$TRACE"
   (cd "$BUILD" && exec env CARO_DATA_DIR="$WORK/data" CARO_TRACE="$TRACE" CARO_AFK_IDLE=600 ./caro >"$WORK/game.log" 2>&1) & GPID=$!
