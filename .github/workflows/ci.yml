@@ -115,7 +115,7 @@ jobs:
         env:
           XINJ_SCALE: "2"
         run: |
-          python -m pip install --quiet pywinpty
+          python -m pip install --quiet pywinpty pyte
           python tests/e2e_tui_windows.py build/Release/caro_tui.exe
 
       - name: Upload screenshots

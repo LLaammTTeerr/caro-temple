@@ -2,7 +2,8 @@
 
 Runs caro_tui.exe inside a Windows pseudo-console (ConPTY, via pywinpty), so key presses go
 through the real console input path (ReadConsoleInputW) and output through the VT renderer.
-Plays the same flow as tests/e2e_tui.sh and asserts on the screen text.
+Output is fed into a VT emulator (pyte) and assertions run on the reconstructed screen,
+because the game repaints only changed cells with cursor jumps. Same flow as tests/e2e_tui.sh.
 Usage: python tests/e2e_tui_windows.py <path to caro_tui.exe>
 """
 import os
@@ -12,24 +13,24 @@ import tempfile
 import threading
 import time
 
+import pyte  # pip install pyte
 from winpty import PtyProcess  # pip install pywinpty
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # screen dumps contain box glyphs
 EXE = sys.argv[1]
 SCALE = float(os.environ.get("XINJ_SCALE", "1"))
-ANSI = re.compile(r"\x1b\[[0-9;?<>]*[ -/]*[@-~]|\x1b[()][0-9A-Za-z]|\x1b[=>78]|\x1b\][^\x07]*\x07")
 KEYS = {"Enter": "\r", "Down": "\x1b[B", "Up": "\x1b[A", "Right": "\x1b[C", "Left": "\x1b[D",
         "Escape": "\x1b", "Home": "\x1b[H", "Space": " "}
 
 env = dict(os.environ, CARO_DATA_DIR=tempfile.mkdtemp(), CARO_AFK_IDLE="600")
 proc = PtyProcess.spawn(EXE, dimensions=(32, 100), env=env)
-seen = ""  # all text received since the last check
+screen = pyte.Screen(100, 32)
+stream = pyte.Stream(screen)
 lock = threading.Lock()
 
 
 def reader():
     """PtyProcess.read() blocks until output arrives, so read on a background thread."""
-    global seen
     while True:
         try:
             data = proc.read(65536)
@@ -39,7 +40,7 @@ def reader():
             return
         if data:
             with lock:
-                seen += ANSI.sub("", data)
+                stream.feed(data)
 
 
 threading.Thread(target=reader, daemon=True).start()
@@ -49,19 +50,19 @@ def pump(seconds):
     time.sleep(seconds * SCALE)
 
 
+def text():
+    with lock:
+        return "\n".join(screen.display)
+
+
 def expect(pattern, what):
-    global seen
     for _ in range(12):
         pump(0.5)
-        with lock:
-            hit = re.search(pattern, seen)
-            if hit:
-                seen = ""
-        if hit:
+        if re.search(pattern, text()):
             print("ok:", what)
             return
     print("E2E TUI (Windows) FAIL:", what, "- wanted", pattern)
-    print(seen[-3000:])
+    print(text())
     proc.terminate(force=True)
     sys.exit(1)
 
