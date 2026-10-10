@@ -16,7 +16,7 @@ expect() { # expect <regex> <what>
 keys() {
   for k in "$@"; do
     t send-keys -t e2e "$k"; pause 0.15
-    { echo "=== after key $k"; screen | grep -E "▶|◀|Champion|New Game|turn|moves" | head -4; } >> "$WORK/trace.txt"
+    { echo "=== after key $k"; screen | grep -E "▶|◀|Champion|New Game|turn|moves" | head -4 || true; } >> "$WORK/trace.txt"
   done
 }
 cleanup() { t kill-server 2>/dev/null || true; }
