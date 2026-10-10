@@ -2,6 +2,8 @@
  * rule. Layout follows docs/DESIGN.md section 5 "New Game setup". Choices live in
  * g_app.settings.last_mode / last_board / last_diff / block_rule. */
 #include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
 #include "screens.h"
 #include "scene.h"
 #include "ui.h"
@@ -19,19 +21,18 @@
 #define CONTENT_X    (PANEL_X + SP_3)        /* 284 */
 #define CONTENT_W    (PANEL_W - 2 * SP_3)    /* 712 */
 #define LABEL_H      24
-#define TITLE_Y_OFF  SP_1                    /* card title offset under the swatch */
-#define MODE_Y       108
-#define MODE_H       136
-#define BOARD_LABEL_Y 260
-#define BOARD_Y      288
-#define BOARD_H      128
+#define MODE_Y       104
+#define MODE_H       120
+#define BOARD_LABEL_Y 240
+#define BOARD_Y      264
+#define BOARD_H      144
 #define BOARD_W      224
 #define BOARD_GAP    20                      /* 3*224 + 2*20 = 712 */
 #define MODE_W       348
-#define ROW_DIFF_Y   432
-#define ROW_RULE_Y   496
+#define ROW_DIFF_Y   424
+#define ROW_RULE_Y   488
 #define ROW_H        56
-#define RULE_DESC_Y  556
+#define RULE_DESC_Y  548
 #define BTN_Y        592
 #define BTN_W        200
 #define CARD_PAD     SP_2
@@ -76,6 +77,8 @@ static void draw_mode_card(Rectangle r, GameMode mode, bool selected, float t, b
     card_selected_check(r, selected);
 }
 
+/* Board card, three lines: big "3 x 3", theme name, then the win rule. The description string is
+ * "Theme - rule" in every language, so it is split at the first " - ". */
 static void draw_board_card(Rectangle r, int idx, bool selected)
 {
     float inner_w = r.width - 2 * CARD_PAD;
@@ -87,10 +90,25 @@ static void draw_board_card(Rectangle r, int idx, bool selected)
     DrawRectangleLinesEx((Rectangle){ r.x + CARD_PAD, r.y + CARD_PAD, inner_w, swatch_h }, 1, COL_STONE_900);
     StrId title = idx == 0 ? S_BOARD_3 : idx == 1 ? S_BOARD_5 : S_BOARD_10;
     StrId desc = idx == 0 ? S_BOARD_3_DESC : idx == 1 ? S_BOARD_5_DESC : S_BOARD_10_DESC;
-    float ty = r.y + CARD_PAD + swatch_h + TITLE_Y_OFF;
+
+    char theme[64], rule[64];
+    const char *d = tr(desc);
+    const char *sep = strstr(d, " - ");
+    if (sep) {
+        size_t n = (size_t)(sep - d);
+        if (n >= sizeof theme) n = sizeof theme - 1;
+        memcpy(theme, d, n);
+        theme[n] = '\0';
+        snprintf(rule, sizeof rule, "%s", sep + 3);
+    } else {
+        snprintf(theme, sizeof theme, "%s", d);
+        rule[0] = '\0';
+    }
+
+    float ty = r.y + CARD_PAD + swatch_h + SP_1;
     text_draw(tr(title), r.x + CARD_PAD, ty, FS_BODY, selected ? COL_GOLD : COL_TEXT);
-    text_draw_wrapped(tr(desc), (Rectangle){ r.x + CARD_PAD, ty + FS_BODY + 4, inner_w, 2 * FS_SMALL },
-                      FS_SMALL, COL_TEXT_DIM, 0);
+    text_draw(theme, r.x + CARD_PAD, ty + FS_BODY + 4, FS_SMALL, COL_TEXT);
+    text_draw(rule, r.x + CARD_PAD, ty + FS_BODY + 4 + FS_SMALL + 2, FS_SMALL, COL_TEXT_DIM);
     card_selected_check(r, selected);
 }
 
