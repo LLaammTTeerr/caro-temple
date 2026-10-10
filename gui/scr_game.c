@@ -309,9 +309,21 @@ static void draw_board(const Game *g, float now)
     if (human_turn && board_cell_at(n, input_mouse(), &hr, &hc) && g->board.c[hr][hc] == CELL_EMPTY)
         fx_draw_ghost(game_cell_of(g->turn), cell_rect(n, hr, hc), 0.55f);
 
+    /* PRD: the opponent's latest move is always highlighted (the AI's move stays marked while
+     * the human thinks). */
     Pos lm;
-    if (game_last_move(g, &lm))
-        fx_draw_last_move(cell_rect(n, lm.r, lm.c), board_get(&g->board, lm.r, lm.c), now);
+    bool has_lm = game_highlight_move(g, &lm);
+    if (has_lm) fx_draw_last_move(cell_rect(n, lm.r, lm.c), board_get(&g->board, lm.r, lm.c), now);
+
+    /* PvE: a faint thin frame on the human's own latest move, so it can still be seen. */
+    Pos own;
+    if (g->mode == MODE_PVE && g->ai_player >= 0 && game_last_move_by(g, 1 - g->ai_player, &own) &&
+        !(has_lm && own.r == lm.r && own.c == lm.c)) {
+        Rectangle oc = cell_rect(n, own.r, own.c);
+        Color mine = game_cell_of(1 - g->ai_player) == CELL_X ? COL_FIRE : COL_WATER;
+        DrawRectangleLinesEx((Rectangle){ oc.x + 6, oc.y + 6, oc.width - 12, oc.height - 12 }, 2,
+                             Fade(mine, 0.3f));
+    }
 
     if (playing) {
         int owners = g->mode == MODE_PVP ? 2 : 1;
@@ -422,14 +434,17 @@ static void draw_info(const Game *g)
     ui_panel(r);
     snprintf(buf, sizeof buf, tr(S_MOVES_FMT), g->move_count);
     text_draw_aligned(buf, cx, r.y + 20, FS_BODY, COL_TEXT, 1);
-    text_draw_aligned(tr(S_LAST_MOVE), cx, r.y + 72, FS_SMALL, COL_TEXT_DIM, 1);
+    text_draw_aligned(tr(S_LAST_MOVE), cx, r.y + 60, FS_SMALL, COL_TEXT_DIM, 1);
     Pos lm;
-    if (game_last_move(g, &lm)) {
+    if (game_highlight_move(g, &lm)) {
         Cell w = board_get(&g->board, lm.r, lm.c);
+        Color mc = w == CELL_X ? COL_FIRE_LIGHT : COL_WATER_LIGHT;
+        int mover = w == game_cell_of(0) ? 0 : 1;
+        text_draw_aligned(g->players[mover].name, cx, r.y + 88, FS_SMALL, mc, 1);
         snprintf(buf, sizeof buf, "(%d, %d)", lm.r + 1, lm.c + 1);
-        text_draw_aligned(buf, cx, r.y + 104, FS_H2, w == CELL_X ? COL_FIRE_LIGHT : COL_WATER_LIGHT, 1);
+        text_draw_aligned(buf, cx, r.y + 120, FS_H2, mc, 1);
     } else {
-        text_draw_aligned("-", cx, r.y + 104, FS_H2, COL_TEXT_DIM, 1);
+        text_draw_aligned("-", cx, r.y + 120, FS_H2, COL_TEXT_DIM, 1);
     }
 }
 
@@ -440,7 +455,6 @@ static void draw_actions(Game *g)
     Rectangle ur = { 24, 456, 288, 56 };
     Rectangle sr = { 24, 528, 288, 56 };
     Rectangle mr = { 24, 600, 288, 56 };
-    Rectangle hr = { 24, 12, 56, 56 };
 
     /* Keys drive the board cursors, so these buttons respond to the mouse only. */
     ui_set_keyboard_nav(false);
@@ -451,14 +465,7 @@ static void draw_actions(Game *g)
     gate(true);
     if (ui_button(mr, tr(S_MENU), BTN_NORMAL)) overlay_open(OVL_PAUSE);
     gate(true);
-    if (ui_icon_button(hr, "", tr(S_HOME))) overlay_open(OVL_LEAVE_CONFIRM);
-
-    /* pixel house glyph on the Home icon */
-    DrawRectangle((int)hr.x + 26, (int)hr.y + 16, 4, 4, COL_GOLD);
-    DrawRectangle((int)hr.x + 22, (int)hr.y + 20, 12, 4, COL_GOLD);
-    DrawRectangle((int)hr.x + 18, (int)hr.y + 24, 20, 4, COL_GOLD);
-    DrawRectangle((int)hr.x + 16, (int)hr.y + 28, 24, 16, COL_TEXT_DIM);
-    DrawRectangle((int)hr.x + 26, (int)hr.y + 34, 4, 10, COL_STONE_900);
+    if (ui_home_button()) overlay_open(OVL_LEAVE_CONFIRM);
 
     if (!playing) {
         DrawRectangleRec(ur, Fade(COL_STONE_900, 0.55f));

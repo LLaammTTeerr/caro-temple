@@ -217,6 +217,7 @@ static void settings_draw(void)
     draw_controls_panel((Rectangle){RIGHT_X, PANEL_Y, PANEL_W, PANEL_H});
 
     if (ui_button((Rectangle){LEFT_X, BACK_Y, 200, 56}, tr(S_BACK), BTN_NORMAL)) go_back();
+    if (ui_home_button()) go_home();
     ui_hint_bar(tr(S_HINT_MENU));
     ui_frame_end();
 }

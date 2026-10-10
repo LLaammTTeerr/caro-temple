@@ -554,13 +554,14 @@ bool overlay_update(float dt)
      * save keeps the match in memory (Continue can still resume it) and shows the error. */
     if (g->afk == AFK_TIMEOUT) {
         int slot = storage_autosave_slot();
+        bool overwrote = storage_first_free_slot() < 0;   /* all slots full: oldest is replaced */
         bool ok = slot >= 0 && storage_save_game(slot, g);
         g->afk = AFK_NONE;
         g->idle = 0.0;
         overlay_close();
         if (ok) {
             char buf[128];
-            snprintf(buf, sizeof buf, tr(S_AFK_SAVED_FMT), slot + 1);
+            snprintf(buf, sizeof buf, tr(overwrote ? S_AFK_OVERWROTE_FMT : S_AFK_SAVED_FMT), slot + 1);
             app_toast(buf);
             g_app.has_game = false;
         } else {
