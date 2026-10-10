@@ -62,6 +62,11 @@ jobs:
           XINJ_SCALE: "2"
         run: tests/e2e_gui.sh build
 
+      - name: Audio test (Linux, captured sound output; music plays, mute is silent)
+        if: runner.os == 'Linux'
+        timeout-minutes: 3
+        run: tests/e2e_audio.sh build
+
       - name: Gamepad end-to-end test (Linux, virtual Xbox 360 pad via uinput)
         if: runner.os == 'Linux'
         timeout-minutes: 5

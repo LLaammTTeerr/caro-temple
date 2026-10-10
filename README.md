@@ -62,7 +62,8 @@ docs/   DESIGN.md (UI design system and screen specs), mockups
 ## Tests
 **CI runs behaviour tests only.** These drive the real programs with real input and assert on what happened:
 - `ctest`: unit tests for rules, the AI (Hard never loses on 3x3, beats Easy on 10x10, < 300 ms per move), match state (clocks, undo, AFK), saves/settings and strings.
-- `tests/e2e_gui.sh build` (Linux): XTest keyboard and mouse into the GUI. Covers a 2-player match to a win, rematch, pause → save, Home → load, and AFK autosave.
+- `tests/e2e_gui.sh build` (Linux): XTest keyboard and mouse into the GUI. Covers a 2-player match to a win, rematch, pause → save, Home → load, AFK autosave, the undo request (declined and accepted), surrender, and the language and mute settings being saved.
+- `tests/e2e_audio.sh build` (Linux): captures the GUI's real sound output and checks that the music plays without clipping and that muting gives silence.
 - `tests/e2e_gui_windows.ps1` (Windows): `SendInput` keyboard and mouse into the GUI. Covers menus → match, a mouse click on the board, pause, and Home.
 - `tests/e2e_gui_macos.sh` (macOS): Quartz key events through `tools/macinj.c` into the GUI. Covers menus → match vs the computer, pause, and Home. GitHub's Mac VMs have no GPU, so CI lets macOS use its software OpenGL renderer for that run.
 - `sudo tests/e2e_gamepad.sh build` (Linux): a virtual Xbox 360 controller (uinput) drives both versions. Covers D-pad/A navigating menus into a match, A placing a stone, B pause/back, and Start → Home.

@@ -106,4 +106,31 @@ mark; printf 'move 1200 100\nkey space\n' | inj; waitfor "overlay 5" "AFK prompt
 waitfor "scene 0" "no answer: back to the main screen"
 ls "$WORK/data"/slot*.sav >/dev/null 2>&1 || fail "AFK autosave missing"
 kill -0 $GPID || fail "game exited after AFK"
+kill $GPID; GPID=; sleep 0.5
+
+echo "== 5. 2-player undo request (decline, accept) and surrender"
+start_game CARO_AFK_IDLE=600
+mark; echo "key Return" | inj; waitfor "scene 1" "New Game"
+mark; printf 'key Right\nkey Return\nsleep 300\nclick 895 620\n' | inj; waitfor "scene 2" "2 players -> Profile"
+mark; echo "click 756 641" | inj; waitfor "scene 5" "match"
+mark; printf 'move 1200 100\nkey space\n' | inj; waitfor "moves 1" "player 1 (Space) placed"
+mark; printf 'key Up\nkey Return\n' | inj; waitfor "moves 2" "player 2 (arrows + Enter) placed"
+mark; echo "click 168 484" | inj; waitfor "overlay 2" "Undo asks the opponent for consent"
+mark; echo "key Return" | inj; waitfor "overlay 0" "opponent declines (default focus)"
+tail -n +$((MARK + 1)) "$TRACE" | grep -q "^moves 1$" && fail "declined undo still removed a move"
+echo "ok: declined undo keeps the move"
+mark; echo "click 168 484" | inj; waitfor "overlay 2" "Undo request again"
+mark; printf 'key Right\nkey Return\n' | inj; waitfor "moves 1" "opponent accepts: the move is taken back"
+mark; echo "click 168 556" | inj; waitfor "overlay 3" "Surrender asks for confirmation"
+mark; printf 'key Right\nkey Return\n' | inj; waitfor "overlay 6" "Yes: surrender ends the match"
+
+echo "== 6. Settings: language and music mute persist"
+mark; echo "key Home" | inj; waitfor "scene 0" "Home"
+mark; echo "click 640 535" | inj; waitfor "scene 3" "Settings"
+echo "key Right" | inj; sleep 1
+grep -qx "lang=1" "$WORK/data/settings.cfg" || fail "language switch not saved"
+echo "ok: language switched to Vietnamese and saved"
+printf 'key Down\nkey Down\nkey Return\n' | inj; sleep 1
+grep -qx "bgm_muted=1" "$WORK/data/settings.cfg" || fail "music mute not saved"
+echo "ok: music mute saved"
 echo "E2E GUI: all checks passed"
