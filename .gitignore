@@ -5,3 +5,4 @@ saves/
 .deps/
 .claude/
 Caro.pdf
+tmux-client-*.log

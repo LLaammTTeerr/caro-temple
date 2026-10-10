@@ -624,3 +624,16 @@ void ui_hint_bar(const char *text)
     Vector2 m = text_measure(text, FS_SMALL);
     text_draw(text, (VIRTUAL_W - m.x) / 2, VIRTUAL_H - 48 + (48 - m.y) / 2, FS_SMALL, fc(COL_TEXT_DIM));
 }
+
+bool ui_home_button(void)
+{
+    Rectangle hr = { 24, 12, 56, 56 };
+    bool act = ui_icon_button(hr, "", tr(S_HOME));
+    /* pixel house glyph */
+    fillr(hr.x + 26, hr.y + 16, 4, 4, COL_GOLD);
+    fillr(hr.x + 22, hr.y + 20, 12, 4, COL_GOLD);
+    fillr(hr.x + 18, hr.y + 24, 20, 4, COL_GOLD);
+    fillr(hr.x + 16, hr.y + 28, 24, 16, COL_TEXT_DIM);
+    fillr(hr.x + 25, hr.y + 34, 6, 10, COL_STONE_900);
+    return act;
+}

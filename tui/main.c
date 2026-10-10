@@ -4,6 +4,7 @@
 #include <string.h>
 #include <time.h>
 #include "tui.h"
+#include "gamepad.h"
 #include "../core/i18n.h"
 
 TuiApp g_tui;
@@ -44,6 +45,36 @@ void tui_start_new_game(void)
     game_new(&g_tui.game, s->last_mode, s->last_diff, s->last_board, s->block_rule, p);
     g_tui.has_game = true;
     tui_goto(TS_GAME);
+}
+
+/* Translate a gamepad action into the key a player would press, so every screen handles
+ * pads exactly like the keyboard: player 0 -> W A S D / Space, player 1 -> arrows / Enter,
+ * BACK -> Esc, HOME -> Home key. */
+static TermEvent pad_to_key(ActionType a, int player)
+{
+    TermEvent ev = { 0 };
+    ev.type = TEV_KEY;
+    switch (a) {
+    case ACT_UP:      if (player == 0) { ev.key = TK_CHAR; ev.ch = 'w'; } else ev.key = TK_UP; break;
+    case ACT_DOWN:    if (player == 0) { ev.key = TK_CHAR; ev.ch = 's'; } else ev.key = TK_DOWN; break;
+    case ACT_LEFT:    if (player == 0) { ev.key = TK_CHAR; ev.ch = 'a'; } else ev.key = TK_LEFT; break;
+    case ACT_RIGHT:   if (player == 0) { ev.key = TK_CHAR; ev.ch = 'd'; } else ev.key = TK_RIGHT; break;
+    case ACT_CONFIRM: if (player == 0) { ev.key = TK_CHAR; ev.ch = ' '; } else ev.key = TK_ENTER; break;
+    case ACT_BACK:    ev.key = TK_ESC; break;
+    case ACT_HOME:    ev.key = TK_HOME; break;
+    default:          ev.type = TEV_NONE; break;
+    }
+    return ev;
+}
+
+/* Which player a pad controls: with two pads, pad N is player N; a single pad drives the
+ * player whose turn it is during a match (and player 1's keys - arrows/Enter - in menus,
+ * where those never type into text fields). */
+static int pad_player(int pad)
+{
+    if (pad_count() >= 2) return pad;
+    if (g_tui.screen == TS_GAME && g_tui.has_game) return g_tui.game.turn;
+    return 1;
 }
 
 ActionType tui_key_action(const TermEvent *ev, int *player)
@@ -91,6 +122,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "caro_tui: this program needs an interactive terminal.\n");
         return 1;
     }
+    pad_init();
     g_tui.screen = TS_HOME;
     g_tui.prev_screen = TS_HOME;
     tui_menu_enter(TS_HOME);
@@ -110,6 +142,15 @@ int main(int argc, char **argv)
         double dt = now - last;
         last = now;
         if (dt > 0.25) dt = 0.25;
+
+        PadEvent pe[16];
+        int npe = pad_poll(pe, 16, dt);
+        for (int i = 0; i < npe && !g_tui.quit; i++) {
+            TermEvent kev = pad_to_key(pe[i].act, pad_player(pe[i].pad));
+            if (kev.type == TEV_NONE) continue;
+            if (g_tui.screen == TS_GAME) tui_game_event(&kev);
+            else tui_menu_event(&kev);
+        }
         if (g_tui.screen == TS_GAME) tui_game_update(dt);
         else tui_menu_update(dt);
 
@@ -132,6 +173,7 @@ int main(int argc, char **argv)
         }
         term_present();
     }
+    pad_shutdown();
     term_shutdown();
     return 0;
 }

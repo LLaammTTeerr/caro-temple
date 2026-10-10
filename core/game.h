@@ -58,6 +58,12 @@ void game_new(Game *g, GameMode mode, Difficulty diff, int board_n, bool block_r
 Cell game_cell_of(int player);
 bool game_is_ai_turn(const Game *g);   /* PvE and turn == ai_player and playing */
 bool game_last_move(const Game *g, Pos *out); /* false if no moves */
+/* Latest move made by `player` (0/1); false if that player has no move on the board. */
+bool game_last_move_by(const Game *g, int player, Pos *out);
+/* The move to highlight for the person about to act (PRD: "the opponent's latest move"):
+ * PvE -> the computer's latest move (stays marked while the AI thinks);
+ * PvP -> the latest move overall (always made by the opponent of the player to move). */
+bool game_highlight_move(const Game *g, Pos *out);
 
 /* Current player plays (r,c). Returns false if illegal / not playing / undo pending /
  * AFK prompt or timeout active.

@@ -42,6 +42,7 @@ typedef enum {
     S_UNDO_DECLINED, S_UNDO_DONE, S_UNDO_NOT_ALLOWED,
     S_SURRENDER_Q_FMT /* %s player name */, S_LEAVE_GAME_Q, S_QUIT_Q,
     S_AFK_TITLE, S_AFK_Q, S_AFK_COUNTDOWN_FMT /* %d seconds */, S_AFK_SAVED_FMT /* %d slot */,
+    S_AFK_OVERWROTE_FMT /* %d slot: all slots were full, oldest overwritten */,
     /* game over */
     S_GAME_OVER, S_WINS_FMT /* %s winner name */, S_DRAW, S_YOU_WIN, S_YOU_LOSE,
     S_REASON_LINE, S_REASON_TIMEOUT, S_REASON_SURRENDER, S_REASON_DRAW, S_REMATCH,

@@ -65,6 +65,25 @@ bool game_last_move(const Game *g, Pos *out)
     return true;
 }
 
+bool game_last_move_by(const Game *g, int player, Pos *out)
+{
+    if (player != 0 && player != 1) return false;
+    for (int i = g->move_count - 1; i >= 0; i--) {
+        if (i % 2 == player) {
+            if (out) *out = g->moves[i];
+            return true;
+        }
+    }
+    return false;
+}
+
+bool game_highlight_move(const Game *g, Pos *out)
+{
+    if (g->mode == MODE_PVE && g->ai_player >= 0)
+        return game_last_move_by(g, g->ai_player, out);
+    return game_last_move(g, out);
+}
+
 bool game_play(Game *g, int r, int c)
 {
     /* AFK prompt is modal and AFK timeout awaits the frontend: no moves until continued. */
