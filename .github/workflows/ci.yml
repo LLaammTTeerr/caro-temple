@@ -63,6 +63,8 @@ jobs:
 
       - name: GUI end-to-end test (injected keyboard/mouse input)
         if: runner.os == 'Linux'
+        env:
+          XINJ_SCALE: "2"
         run: tests/e2e_gui.sh build
 
       - name: Upload screenshots

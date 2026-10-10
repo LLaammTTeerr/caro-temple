@@ -56,7 +56,13 @@ int main(void)
             XTestFakeButtonEvent(d, 1, True, 0); XFlush(d); usleep(60000);
             XTestFakeButtonEvent(d, 1, False, 0); XFlush(d); usleep(60000);
         }
-        else if (!strcmp(cmd, "sleep")) usleep(atoi(rest) * 1000);
+        else if (!strcmp(cmd, "sleep")) {
+            /* XINJ_SCALE stretches every wait (slow CI machines) */
+            const char *sc = getenv("XINJ_SCALE");
+            double k = sc ? atof(sc) : 1.0;
+            if (k < 1.0) k = 1.0;
+            usleep((useconds_t)(atoi(rest) * 1000 * k));
+        }
         else if (!strcmp(cmd, "shot") && sscanf(rest, "%255s", a) == 1) {
             char c[400]; snprintf(c, sizeof c, "import -window root %s", a);
             if (system(c) != 0) fprintf(stderr, "shot failed\n");

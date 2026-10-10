@@ -17,7 +17,7 @@ sleep 1
 inj() { DISPLAY=$DISP "$WORK/xinj"; }
 start_game() { # extra env as args
   (cd "$BUILD" && env DISPLAY=$DISP CARO_DATA_DIR="$WORK/data" "$@" ./caro >"$WORK/game.log" 2>&1) & GPID=$!
-  sleep 2
+  sleep $(( 2 * ${XINJ_SCALE:-1} ))
 }
 fail() { echo "E2E FAIL: $*"; ls -la "$WORK" "$WORK/data" 2>/dev/null; exit 1; }
 
