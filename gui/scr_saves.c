@@ -15,10 +15,10 @@
 #include "../core/i18n.h"
 
 #define CARD_W     560
-#define CARD_H     96
-#define CARD_GAP   16
+#define CARD_H     88
+#define CARD_GAP   12
 #define GRID_X     72     /* (1280 - (2 * 560 + 16)) / 2 */
-#define GRID_Y     104
+#define GRID_Y     128
 #define DEL_W      112
 #define DEL_H      40
 #define DEL_RIGHT  16     /* gap between Delete button and card edge */
@@ -110,7 +110,7 @@ static void draw_card_used(const SlotInfo *s, Rectangle c, int slot)
 
     snprintf(names, sizeof names, "%s vs %s", s->p1, s->p2);
     fit_text(line, sizeof line, names, c.width - SP_3 - DEL_RIGHT - DEL_W - SP_2);
-    text_draw(line, c.x + SP_3, c.y + 44, FS_SMALL, COL_TEXT);
+    text_draw(line, c.x + SP_3, c.y + 38, FS_SMALL, COL_TEXT);
 
     if (s->mode == MODE_PVE) {
         if ((int)s->diff >= 0 && (int)s->diff < DIFF_COUNT)
@@ -121,10 +121,10 @@ static void draw_card_used(const SlotInfo *s, Rectangle c, int slot)
         snprintf(mode, sizeof mode, "%s - %s", tr(S_MODE_PVP), board_label(s->board_n));
     }
     fit_text(line, sizeof line, mode, 300);
-    text_draw(line, c.x + SP_3, c.y + 68, FS_SMALL, COL_TEXT_DIM);
+    text_draw(line, c.x + SP_3, c.y + 60, FS_SMALL, COL_TEXT_DIM);
 
     snprintf(line, sizeof line, tr(S_MOVES_FMT), s->move_count);
-    text_draw_aligned(line, c.x + c.width - DEL_RIGHT - DEL_W - SP_2, c.y + 68, FS_SMALL, COL_TEXT_DIM, 2);
+    text_draw_aligned(line, c.x + c.width - DEL_RIGHT - DEL_W - SP_2, c.y + 60, FS_SMALL, COL_TEXT_DIM, 2);
 }
 
 /* Dashed rectangle outline, used for empty slots. */
@@ -183,7 +183,7 @@ static void draw_card(int i, Rectangle c)
         char line[48];
         snprintf(line, sizeof line, tr(S_SLOT_FMT), i + 1);
         text_draw(line, c.x + SP_3, c.y + SP_1, FS_BODY, Fade(COL_TEXT, 0.7f));
-        text_draw(tr(S_EMPTY_SLOT), c.x + SP_3, c.y + 44, FS_SMALL, Fade(COL_TEXT, 0.7f));
+        text_draw(tr(S_EMPTY_SLOT), c.x + SP_3, c.y + 38, FS_SMALL, Fade(COL_TEXT, 0.7f));
     }
 }
 
@@ -271,7 +271,7 @@ static void saves_draw(void)
     if (ui_button((Rectangle){ GRID_X, SP_2, 176, 56 }, tr(S_BACK), BTN_NORMAL)) go_back();
 
     for (int i = 0; i < SAVE_SLOTS; i++) if (slots[i].used) any_used = true;
-    if (load && !any_used) text_draw_aligned(tr(S_NO_SAVES), VIRTUAL_W / 2, 76, FS_SMALL, COL_TEXT_DIM, 1);
+    if (load && !any_used) text_draw_aligned(tr(S_NO_SAVES), VIRTUAL_W / 2, 84, FS_BODY, COL_TEXT, 1);
 
     for (int i = 0; i < SAVE_SLOTS; i++) {
         Rectangle c = { GRID_X + (i % 2) * (CARD_W + CARD_GAP), GRID_Y + (i / 2) * (CARD_H + CARD_GAP),
