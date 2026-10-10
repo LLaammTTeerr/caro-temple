@@ -204,6 +204,9 @@ static void draw(void)
         scene_push(SCENE_PROFILE);
     }
 
+    /* Home icon last in focus order: the mode card stays the first focused widget on enter. */
+    if (ui_home_button()) scene_goto(SCENE_HOME);
+
     ui_hint_bar(tr(S_HINT_MENU));
     ui_frame_end();
 }

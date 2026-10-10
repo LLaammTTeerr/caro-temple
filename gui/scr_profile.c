@@ -193,6 +193,9 @@ static void draw(void)
         try_start(pve);
     }
 
+    /* Home icon last in focus order. Not while a name is being typed (Esc/Enter belong to the box). */
+    if (ui_home_button() && !ui_textbox_editing()) scene_goto(SCENE_HOME);
+
     ui_hint_bar(ui_textbox_editing() ? tr(S_HINT_TEXT) : tr(S_HINT_MENU));
     ui_frame_end();
 }

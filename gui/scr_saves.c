@@ -22,6 +22,7 @@
 #define DEL_W      112
 #define DEL_H      40
 #define DEL_RIGHT  16     /* gap between Delete button and card edge */
+#define BACK_W     176
 #define POP_W      600
 #define POP_H      260
 #define POP_FADE   0.18f
@@ -267,8 +268,11 @@ static void saves_draw(void)
 
     text_draw_aligned(tr(load ? S_LOAD_TITLE : S_SAVE_GAME), VIRTUAL_W / 2, SP_2, FS_H1, COL_GOLD, 1);
 
+    /* Back sits at the top-right, level with the title; the Home icon owns the top-left corner. */
     ui_set_interactive(popup_kind == POP_NONE);
-    if (ui_button((Rectangle){ GRID_X, SP_2, 176, 56 }, tr(S_BACK), BTN_NORMAL)) go_back();
+    if (ui_button((Rectangle){ GRID_X + 2 * CARD_W + CARD_GAP - BACK_W, SP_2, BACK_W, 56 }, tr(S_BACK),
+                  BTN_NORMAL))
+        go_back();
 
     for (int i = 0; i < SAVE_SLOTS; i++) if (slots[i].used) any_used = true;
     if (load && !any_used) text_draw_aligned(tr(S_NO_SAVES), VIRTUAL_W / 2, 84, FS_BODY, COL_TEXT, 1);
@@ -278,6 +282,9 @@ static void saves_draw(void)
                         CARD_W, CARD_H };
         draw_card(i, c);
     }
+
+    /* Home icon last in focus order; inert while the popup is open (interactive is off). */
+    if (ui_home_button()) scene_goto(SCENE_HOME);
 
     if (popup_kind != POP_NONE) {
         ui_dim_screen(0.55f);
