@@ -28,6 +28,10 @@ void ui_focus_reset(void);                /* focus first widget of the current s
 void ui_focus_set(int index);
 int  ui_focus_get(void);
 void ui_set_interactive(bool on);         /* default true each frame */
+/* Default true each frame. false: widgets drawn after this call (until frame end) are
+ * mouse-only - no keyboard/gamepad focus ring, navigation or confirm (game HUD, where the
+ * keys drive the board cursors). Widgets are also inert while a scene transition runs. */
+void ui_set_keyboard_nav(bool on);
 
 bool ui_button(Rectangle r, const char *label, ButtonStyle style);          /* true when activated */
 bool ui_icon_button(Rectangle r, const char *glyph, const char *tooltip);   /* small square button */

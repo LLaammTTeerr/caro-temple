@@ -24,6 +24,7 @@ typedef enum {
     S_PROFILE_TITLE, S_PLAYER_1, S_PLAYER_2, S_NAME, S_AVATAR, S_ENTER_NAME,
     S_NAME_EMPTY,          /* validation error */
     S_PLAYS_FIRE, S_PLAYS_WATER, /* "Plays Fire (X)" / "Plays Water (O)" */
+    S_AVATAR_0, S_AVATAR_1, S_AVATAR_2, S_AVATAR_3, S_AVATAR_4, S_AVATAR_5, /* mascot names */
     /* settings */
     S_LANGUAGE, S_LANG_NAME, /* S_LANG_NAME = this language's own name: "English"/"Tiếng Việt" */
     S_MUSIC, S_SOUND_FX, S_VOLUME, S_MUTE, S_REDUCED_MOTION, S_FULLSCREEN,

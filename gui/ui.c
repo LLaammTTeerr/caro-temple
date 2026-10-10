@@ -10,6 +10,7 @@
 #include "input.h"
 #include "audio.h"
 #include "app.h"
+#include "scene.h"
 #include "../core/i18n.h"
 
 #define SCOPES 4
@@ -25,6 +26,8 @@ typedef struct { float t; float aux; } Anim;
 typedef struct { bool active, hover, focus; int scope, idx; float t; } W;
 
 static bool interactive = true;
+static bool kbnav = true;         /* keyboard/gamepad focus navigation enabled (per frame) */
+static bool blocked;              /* scene transition running: all widgets inert */
 static int cur_scope = 0;
 static int focus[SCOPES];
 static int cnt[SCOPES];           /* interactive widgets drawn this frame, per scope */
@@ -111,13 +114,13 @@ static W wbegin(Rectangle r)
 {
     W w;
     memset(&w, 0, sizeof w);
-    if (!interactive) return w;
+    if (!interactive || blocked) return w;
     w.active = true;
     w.scope = cur_scope;
     w.idx = cnt[cur_scope]++;
     w.hover = in_rect(input_mouse(), r);
     if (w.hover && (input_mouse_moved() || input_mouse_pressed())) focus[cur_scope] = w.idx;
-    w.focus = focus[cur_scope] == w.idx;
+    w.focus = kbnav ? focus[cur_scope] == w.idx : w.hover;
     last_scope = cur_scope;
     int ai = w.idx < MAX_W ? w.idx : MAX_W - 1;
     w.t = anim_step(&anim[cur_scope][ai].t, w.focus);
@@ -134,7 +137,7 @@ static Anim *anim_of(const W *w)
 static bool activate(const W *w)
 {
     if (!w->active) return false;
-    bool a = (w->focus && input_pressed(ACT_CONFIRM, -1)) || (w->hover && input_mouse_pressed());
+    bool a = (kbnav && w->focus && input_pressed(ACT_CONFIRM, -1)) || (w->hover && input_mouse_pressed());
     if (a) audio_play(SFX_CLICK);
     return a;
 }
@@ -142,6 +145,8 @@ static bool activate(const W *w)
 void ui_frame_begin(void)
 {
     interactive = true;
+    kbnav = true;
+    blocked = scene_transitioning();
     cur_scope = 0;
     g_fade = 1.0f;
     lr_used = false;
@@ -167,7 +172,7 @@ void ui_frame_end(void)
     } else {
         if (focus[ns] < 0) focus[ns] = 0;
         if (focus[ns] >= n) focus[ns] = n - 1;
-        if (!edit_active) {
+        if (!edit_active && kbnav) {
             if (input_pressed(ACT_UP, -1)) focus[ns] = (focus[ns] + n - 1) % n;
             if (input_pressed(ACT_DOWN, -1)) focus[ns] = (focus[ns] + 1) % n;
             if (!lr_used && input_pressed(ACT_LEFT, -1)) focus[ns] = (focus[ns] + n - 1) % n;
@@ -188,6 +193,7 @@ void ui_focus_reset(void) { focus[cur_scope] = 0; }
 void ui_focus_set(int index) { focus[cur_scope] = index < 0 ? 0 : index; }
 int ui_focus_get(void) { return focus[cur_scope]; }
 void ui_set_interactive(bool on) { interactive = on; }
+void ui_set_keyboard_nav(bool on) { kbnav = on; }
 
 /* ---- buttons ---- */
 
@@ -206,7 +212,7 @@ static bool button_core(Rectangle r, const char *label, ButtonStyle style, bool 
 {
     W w = wbegin(r);
     bool act = activate(&w);
-    bool held = w.active && ((w.focus && input_down(ACT_CONFIRM, -1)) || (w.hover && input_mouse_down()));
+    bool held = w.active && ((kbnav && w.focus && input_down(ACT_CONFIRM, -1)) || (w.hover && input_mouse_down()));
     float t = w.t;
     bool ghost = style == BTN_GHOST;
     Color fill = COL_STONE_700, txt = COL_TEXT, mark = COL_GOLD;
@@ -244,7 +250,7 @@ static bool button_core(Rectangle r, const char *label, ButtonStyle style, bool 
     float tx = b.x + (b.width - m.x) / 2, ty = b.y + (b.height - m.y) / 2;
     if (t > 0.5f) text_draw_bold(label, tx, ty, FS_BODY, fc(txt));
     else text_draw(label, tx, ty, FS_BODY, fc(txt));
-    if (marker && w.focus && tx - (b.x + 24) > 8)
+    if (marker && !ghost && w.focus && label[0] && tx - (b.x + 24) > 8)
         draw_marker(b.x + 12, b.y + (b.height - 20) / 2, 4, fc(mark), false);
 
     if (out) *out = w;
@@ -369,7 +375,11 @@ bool ui_choice(Rectangle r, const char *label, const char *const *options, int c
 {
     W w = wbegin(r);
     bool changed = false;
-    float bw = 360;
+    /* value box: up to 360 px but never over the label (label starts at r.x + 32) */
+    float lw = text_measure(label, FS_BODY).x + 32 + SP_3;
+    float bw = r.width - lw;
+    if (bw > 360) bw = 360;
+    if (bw < 160) bw = 160;
     Rectangle box = { r.x + r.width - bw, r.y, bw, r.height };
     Rectangle la = { box.x, box.y, 48, box.height };
     Rectangle ra = { box.x + box.width - 48, box.y, 48, box.height };

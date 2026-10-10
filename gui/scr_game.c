@@ -15,6 +15,7 @@
 #include "input.h"
 #include "audio.h"
 #include "app.h"
+#include "ai_worker.h"
 #include "../core/i18n.h"
 
 #define BOARD_X 340.0f
@@ -33,6 +34,7 @@ static bool s_over_seen;                        /* game-over sound/effects alrea
 static float s_placed[CARO_MAX_N][CARO_MAX_N];  /* g_app.time when each cell was placed */
 static Pos s_cur[2];                            /* keyboard/gamepad cursor per player */
 static float s_ai_delay = -1.0f;                /* AI thinking countdown, < 0 = not armed */
+static int64_t s_ai_key;                        /* position the running AI search belongs to */
 static float s_flash_t;                         /* remaining red flash time */
 static Pos s_flash;                             /* cell being flashed */
 static int s_tick_key = -1;                     /* last clock tick (turn * 100 + second) */
@@ -231,16 +233,25 @@ static void update(float dt)
     /* Swallow the confirm press so a focused HUD button does not also fire. */
     if (conf_any) input_consume();
 
-    /* AI: arm a 0.35-0.6 s thinking delay, then move. Only reached when no overlay is open. */
+    /* AI: search on a worker thread while a 0.35-0.6 s "thinking" delay runs, then move once
+     * both are done. Only reached when no overlay is open. The result is applied only if the
+     * position is unchanged (same match and move count). */
     if (game_is_ai_turn(g)) {
-        if (s_ai_delay < 0.0f) s_ai_delay = 0.35f + 0.25f * (float)(rng_next() % 1000u) / 1000.0f;
+        if (s_ai_delay < 0.0f) {
+            s_ai_delay = 0.35f + 0.25f * (float)(rng_next() % 1000u) / 1000.0f;
+            s_ai_key = g->start_time * 1000 + g->move_count;
+            ai_worker_start(&g->board, game_cell_of(g->turn), g->diff, rng_next() | 1u);
+        }
         s_ai_delay -= dt;
-        if (s_ai_delay <= 0.0f) {
+        Pos p;
+        if (s_ai_delay <= 0.0f && ai_worker_poll(&p)) {
             s_ai_delay = -1.0f;
-            Pos p = ai_choose_move(&g->board, game_cell_of(g->turn), g->diff, &g_app.rng);
-            if (p.r >= 0) game_play(g, p.r, p.c);
+            if (s_ai_key == g->start_time * 1000 + g->move_count && p.r >= 0) game_play(g, p.r, p.c);
+        } else if (s_ai_delay <= 0.0f) {
+            s_ai_delay = 0.0f; /* keep waiting for the worker */
         }
     } else {
+        if (s_ai_delay >= 0.0f) ai_worker_cancel();
         s_ai_delay = -1.0f;
     }
     sync(g);
@@ -459,9 +470,16 @@ static void enter(void)
     if (!same_match(&g_app.game)) reset_match(&g_app.game);
     else if (s_seen > g_app.game.move_count) s_seen = g_app.game.move_count;
     s_ai_delay = -1.0f;
+    ai_worker_cancel();
+}
+
+static void leave(void)
+{
+    ai_worker_cancel();
+    s_ai_delay = -1.0f;
 }
 
 void scr_game_register(void)
 {
-    scene_register(SCENE_GAME, (Scene){ enter, NULL, update, draw });
+    scene_register(SCENE_GAME, (Scene){ enter, leave, update, draw });
 }

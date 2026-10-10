@@ -18,6 +18,7 @@
 #include "art.h"
 #include "fx.h"
 #include "audio.h"
+#include "ai_worker.h"
 #include "../core/i18n.h"
 
 static void demo_game(int board_n, bool pvp, bool finished)
@@ -125,6 +126,16 @@ int main(int argc, char **argv)
         audio_update();
         fx_update(dt);
         scene_update(dt);
+        /* AFK keeps running while Settings / Saves is opened over a live match: the game scene
+         * is not updated then, so tick it here and return to the match when the prompt fires
+         * (the game's overlay then shows the countdown). */
+        if (g_app.has_game && g_app.game.status == GS_PLAYING && !scene_transitioning() &&
+            (scene_current() == SCENE_SETTINGS || scene_current() == SCENE_SAVES) &&
+            scene_previous() == SCENE_GAME) {
+            if (input_any_activity()) game_activity(&g_app.game);
+            game_tick(&g_app.game, dt, false);
+            if (g_app.game.afk != AFK_NONE) scene_pop();
+        }
 
         BeginTextureMode(target);
         ClearBackground(COL_STONE_900);
@@ -155,6 +166,7 @@ int main(int argc, char **argv)
         }
     }
 
+    ai_worker_shutdown();
     audio_shutdown();
     fx_shutdown();
     art_unload();
