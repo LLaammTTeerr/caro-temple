@@ -1,8 +1,9 @@
 /* scr_game.c - the in-match screen (SCENE_GAME): board, HUD cards, clocks, top bar, actions.
  *
  * Input model: board keys/mouse are handled in update(); HUD buttons are immediate-mode widgets
- * handled in draw(). ACT_CONFIRM pressed on this screen is swallowed with input_consume() so a
- * focused HUD button never fires on the same Space/Enter/A press that places a stone. */
+ * handled in draw(). The HUD buttons are mouse-only (ui_set_keyboard_nav(false)) because the
+ * keys drive the board cursors; keyboard/gamepad users reach Undo/Surrender/Save/Home through
+ * the Pause overlay (Esc / gamepad B). */
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -18,9 +19,10 @@
 #include "ai_worker.h"
 #include "../core/i18n.h"
 
-#define BOARD_X 340.0f
-#define BOARD_Y 80.0f
-#define BOARD_S 600.0f
+#define BOARD_X 352.0f    /* (1280 - 576) / 2: centred horizontally */
+#define BOARD_Y 80.0f     /* top of the board; HUD cards align to it */
+#define BOARD_S 576.0f    /* ends at y 656, 16 px above the hint bar (y 672) */
+#define TOP_Y 8.0f        /* top bar: y 8 .. 72 */
 #define APPEAR_T 0.25f     /* piece pop-in duration */
 #define FLASH_T 0.4f       /* red flash on an occupied cell */
 #define SETTLED (-1000.0f) /* placed-at time for pieces that should not animate */
@@ -38,6 +40,8 @@ static int64_t s_ai_key;                        /* position the running AI searc
 static float s_flash_t;                         /* remaining red flash time */
 static Pos s_flash;                             /* cell being flashed */
 static int s_tick_key = -1;                     /* last clock tick (turn * 100 + second) */
+static int s_hist_n;                            /* move history seen at the last frame ... */
+static Pos s_hist[GAME_MAX_MOVES];              /* ... used to detect a different match */
 
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -58,6 +62,23 @@ static bool same_match(const Game *g)
     return g->start_time == s_key_start && g->mode == s_key_mode && g->board.n == s_key_n;
 }
 
+/* True when the move list disagrees with the remembered one within the shared prefix: a
+ * different match that happens to share start_time (e.g. an earlier save loaded). A shorter
+ * list with a matching prefix is just an undo and is not a divergence. */
+static bool history_diverged(const Game *g)
+{
+    int n = g->move_count < s_hist_n ? g->move_count : s_hist_n;
+    for (int i = 0; i < n; i++)
+        if (g->moves[i].r != s_hist[i].r || g->moves[i].c != s_hist[i].c) return true;
+    return false;
+}
+
+static void remember_history(const Game *g)
+{
+    s_hist_n = g->move_count;
+    memcpy(s_hist, g->moves, sizeof(Pos) * (size_t)g->move_count);
+}
+
 static void reset_match(const Game *g)
 {
     s_key_start = g->start_time;
@@ -71,6 +92,7 @@ static void reset_match(const Game *g)
     s_ai_delay = -1.0f;
     s_flash_t = 0.0f;
     s_tick_key = -1;
+    remember_history(g);
 }
 
 static Rectangle cell_rect(int n, int r, int c)
@@ -187,7 +209,8 @@ static void update(float dt)
 {
     Game *g = &g_app.game;
     if (!g_app.has_game) return;
-    if (!same_match(g)) reset_match(g);
+    if (!same_match(g) || history_diverged(g)) reset_match(g);
+    remember_history(g);
     if (s_flash_t > 0.0f) s_flash_t -= dt;
 
     if (overlay_update(dt)) {
@@ -230,8 +253,6 @@ static void update(float dt)
             }
         }
     }
-    /* Swallow the confirm press so a focused HUD button does not also fire. */
-    if (conf_any) input_consume();
 
     /* AI: search on a worker thread while a 0.35-0.6 s "thinking" delay runs, then move once
      * both are done. Only reached when no overlay is open. The result is applied only if the
@@ -316,7 +337,7 @@ static void draw_board(const Game *g, float now)
 
 static void draw_top_bar(const Game *g)
 {
-    Rectangle r = { BOARD_X, 12, BOARD_S, 60 };
+    Rectangle r = { BOARD_X, TOP_Y, BOARD_S, 64 };
     ui_panel(r);
 
     char banner[96];
@@ -328,7 +349,7 @@ static void draw_top_bar(const Game *g)
         snprintf(banner, sizeof banner, "%s", tr(S_GAME_OVER));
     }
     float bsize = text_measure(banner, FS_BODY).x > BOARD_S - 40 ? FS_SMALL : FS_BODY;
-    text_draw_aligned(banner, r.x + r.width / 2, r.y + 8, bsize, bc, 1);
+    text_draw_aligned(banner, r.x + r.width / 2, r.y + 6, bsize, bc, 1);
 
     char hhmm[16] = "--:--";
     time_t t = (time_t)g->start_time;
@@ -338,12 +359,12 @@ static void draw_top_bar(const Game *g)
     snprintf(started, sizeof started, tr(S_STARTED_AT_FMT), hhmm);
     fmt_mmss(g->elapsed, false, el, sizeof el);
     snprintf(line, sizeof line, "%s     %s %s", started, tr(S_ELAPSED), el);
-    text_draw_aligned(line, r.x + r.width / 2, r.y + 36, FS_SMALL, COL_TEXT_DIM, 1);
+    text_draw_aligned(line, r.x + r.width / 2, r.y + 40, FS_SMALL, COL_TEXT_DIM, 1);
 }
 
 static void draw_hud(const Game *g, int p, float now)
 {
-    Rectangle card = p == 0 ? (Rectangle){ 24, 80, 288, 360 } : (Rectangle){ 968, 80, 288, 360 };
+    Rectangle card = p == 0 ? (Rectangle){ 24, BOARD_Y, 288, 360 } : (Rectangle){ 968, BOARD_Y, 288, 360 };
     Color elem = p == 0 ? COL_FIRE : COL_WATER;
     bool playing = g->status == GS_PLAYING;
     bool active = playing && g->turn == p;
@@ -354,9 +375,15 @@ static void draw_hud(const Game *g, int p, float now)
     ui_panel(card);
     if (active) {
         float pulse = tri(now * 0.5f);
-        DrawRectangleLinesEx((Rectangle){ card.x - 4, card.y - 4, card.width + 8, card.height + 8 },
-                             3, Fade(elem, 0.3f + 0.3f * pulse));
-        DrawRectangleLinesEx(card, 4, elem);
+        bool low = g->clock[p] < 60.0;
+        Color edge = elem, glow = Fade(elem, 0.3f + 0.3f * pulse);
+        if (low) { /* under a minute: the border pulses danger red */
+            float lp = tri(now * 1.5f);
+            edge = Fade(COL_DANGER, 0.55f + 0.45f * lp);
+            glow = Fade(COL_DANGER, 0.3f + 0.4f * lp);
+        }
+        DrawRectangleLinesEx((Rectangle){ card.x - 4, card.y - 4, card.width + 8, card.height + 8 }, 3, glow);
+        DrawRectangleLinesEx(card, 4, edge);
     }
 
     art_draw_avatar(pi->avatar, (Rectangle){ cx - 48, card.y + 16, 96, 96 }, now);
@@ -415,6 +442,8 @@ static void draw_actions(Game *g)
     Rectangle mr = { 24, 600, 288, 56 };
     Rectangle hr = { 24, 12, 56, 56 };
 
+    /* Keys drive the board cursors, so these buttons respond to the mouse only. */
+    ui_set_keyboard_nav(false);
     gate(playing);
     if (ui_button(ur, tr(S_UNDO), BTN_NORMAL)) do_undo(g);
     gate(playing);
@@ -455,7 +484,8 @@ static void draw(void)
     draw_hud(g, 1, now);
     draw_actions(g);
     draw_info(g);
-    ui_hint_bar(tr(g->mode == MODE_PVP ? S_HINT_GAME_PVP : S_HINT_GAME_PVE));
+    if (overlay_current() == OVL_NONE)
+        ui_hint_bar(tr(g->mode == MODE_PVP ? S_HINT_GAME_PVP : S_HINT_GAME_PVE));
 
     ui_frame_end();
     overlay_draw();
@@ -467,7 +497,10 @@ static void enter(void)
     fx_clear();
     ui_focus_reset();
     if (!g_app.has_game) return;
-    if (!same_match(&g_app.game)) reset_match(&g_app.game);
+    /* A different match, or a shorter history (earlier save loaded / undo before leaving):
+     * reset the visual state. Otherwise keep the cursor and effects as they were. */
+    if (!same_match(&g_app.game) || history_diverged(&g_app.game) || g_app.game.move_count < s_hist_n)
+        reset_match(&g_app.game);
     else if (s_seen > g_app.game.move_count) s_seen = g_app.game.move_count;
     s_ai_delay = -1.0f;
     ai_worker_cancel();
