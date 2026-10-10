@@ -19,7 +19,10 @@ bool game_last_move(const Game *g, Pos *out) { if (!g->move_count) return false;
 bool game_play(Game *g, int r, int c)
 {
     if (g->status != GS_PLAYING || !board_place(&g->board, r, c, game_cell_of(g->turn))) return false;
-    g->moves[g->move_count++] = (Pos){r, c}; g->turn ^= 1; g->idle = 0; return true;
+    g->moves[g->move_count++] = (Pos){r, c};
+    if (rules_check_win_at(&g->board, r, c, &g->win_line)) { g->status = GS_OVER; g->end_reason = END_LINE; g->winner = g->turn; return true; }
+    if (board_full(&g->board)) { g->status = GS_OVER; g->end_reason = END_DRAW; g->winner = -1; return true; }
+    g->turn ^= 1; g->idle = 0; return true;
 }
 void game_tick(Game *g, double dt, bool clocks_running) { if (clocks_running && g->status == GS_PLAYING) { g->clock[g->turn] -= dt; g->elapsed += dt; } }
 void game_activity(Game *g) { if (g->afk == AFK_NONE) g->idle = 0; }
