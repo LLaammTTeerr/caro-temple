@@ -553,6 +553,10 @@ static const MascotDef s_mascots[MASCOT_COUNT] = {
       { 0x1A1C12, 0x8A8F70, 0x656A50, 0xC8CCAE, 0x1A1C12, 0xB9B79C, 0xE8E6CF } },
     { { ".......L........", "......LLL.......", ".......A........", ".......A........", ".....AAAAA......", "................" },
       { 0x121110, 0x3D3A36, 0x2A2825, 0x6B6660, 0xF0A27E, 0xC9A227, 0xE8D27A } },
+    { { "................", "................", "......AAAA......", ".....AALLAA.....", "....AALAAAAA....", "...AAAAAAAAAA..." },
+      { 0x4A3A1E, 0xD8C08A, 0xB39A62, 0xF4E6BE, 0x2A2014, 0x8C6A3A, 0xB08850 } },
+    { { "................", "...A.......A....", "...AA.....AA....", "....AA.L.AA.....", ".....AALAA......", "....AAAAAAA....." },
+      { 0x120A1E, 0x3B2A5A, 0x2A1D42, 0x6E58A0, 0xFF4FD8, 0xE8C25A, 0xFF6FE0 } },
 };
 
 static const char *s_body[10] = {
@@ -606,6 +610,7 @@ static void compose_mascot(MascotId m, int variant, Color out[256])
                 case 'E':
                     col = pal[4];
                     if (variant == 1) col = (y == 8) ? pal[1] : pal[2];   /* top eye row -> body, bottom -> shade */
+                    if (variant == 2 && m == MASCOT_WARDEN) col = pal[6]; /* glow peak: brighter magenta */
                     break;
                 default: continue;
                 }
@@ -632,6 +637,12 @@ static void compose_mascot(MascotId m, int variant, Color out[256])
     }
 }
 
+/* Mascots with a third frame: fire/water flicker or shimmer, the Warden's eye glow. Others alias frame 0. */
+static bool has_frame2(int m)
+{
+    return m == MASCOT_FIRE || m == MASCOT_WATER || m == MASCOT_WARDEN;
+}
+
 /* Visible-content box (art px, inclusive) of each mascot, union over all its frames. */
 static int s_bx0[MASCOT_COUNT], s_by0[MASCOT_COUNT], s_bx1[MASCOT_COUNT], s_by1[MASCOT_COUNT];
 
@@ -641,8 +652,7 @@ static void bake_mascots(void)
     for (int m = 0; m < MASCOT_COUNT; m++) {
         s_bx0[m] = 16; s_by0[m] = 16; s_bx1[m] = -1; s_by1[m] = -1;
         for (int v = 0; v < 3; v++) {
-            /* only fire and water have a flicker/shimmer frame; others reuse the normal texture */
-            if (v == 2 && m != MASCOT_FIRE && m != MASCOT_WATER) {
+            if (v == 2 && !has_frame2(m)) {
                 s_mascot[m][2] = s_mascot[m][0];
                 continue;
             }
@@ -796,8 +806,8 @@ void art_unload(void)
     for (int i = 0; i < BG_COUNT; i++) UnloadTexture(s_bg[i]);
     for (int m = 0; m < MASCOT_COUNT; m++)
         for (int v = 0; v < 3; v++) {
-            /* [2] may alias [0] for non-flicker mascots: unload each distinct id once */
-            if (v == 2 && m != MASCOT_FIRE && m != MASCOT_WATER) continue;
+            /* [2] may alias [0] for mascots without frame 2: unload each distinct id once */
+            if (v == 2 && !has_frame2(m)) continue;
             UnloadTexture(s_mascot[m][v]);
         }
     UnloadTexture(s_glow);
@@ -1002,6 +1012,12 @@ void art_draw_mascot(MascotId m, Rectangle dst, float t, bool animate)
     float w = 16.0f * sc;
     DrawTexturePro(s_mascot[m][var], (Rectangle){ 0, 0, 16, 16 }, (Rectangle){ x, y, w, w },
                    (Vector2){ 0, 0 }, 0.0f, WHITE);
+    /* Obsidian Warden: the bright-eye frame fades in and out over the base eyes (2.4 s cycle) */
+    if (m == MASCOT_WARDEN && var == 0 && !calm) {
+        float pulse = 0.5f + 0.5f * sinf(t * (2.0f * PI / 2.4f));
+        DrawTexturePro(s_mascot[m][2], (Rectangle){ 0, 0, 16, 16 }, (Rectangle){ x, y, w, w },
+                       (Vector2){ 0, 0 }, 0.0f, ca(WHITE, (int)(pulse * 170.0f)));
+    }
 }
 
 void art_draw_avatar(int avatar, Rectangle d, float t)
@@ -1025,10 +1041,12 @@ void art_draw_avatar(int avatar, Rectangle d, float t)
     Color top = COL_STONE_700, bot = COL_STONE_900;
     if (m == MASCOT_FIRE) { top = hex(0x5C2412); bot = hex(0x240C08); }
     else if (m == MASCOT_WATER) { top = hex(0x123456); bot = hex(0x061628); }
+    else if (m == MASCOT_NOVICE) { top = hex(0x5A4A2A); bot = hex(0x241C10); }
+    else if (m == MASCOT_WARDEN) { top = hex(0x2A1A44); bot = hex(0x0A0614); }
     DrawRectangleGradientV((int)back.x, (int)back.y, (int)back.width, (int)back.height, top, bot);
 
-    if (m == MASCOT_FIRE || m == MASCOT_WATER) {
-        Color gc = m == MASCOT_FIRE ? hex(0xFF7A2A) : hex(0x3CB4FF);
+    if (m == MASCOT_FIRE || m == MASCOT_WATER || m == MASCOT_WARDEN) {
+        Color gc = m == MASCOT_FIRE ? hex(0xFF7A2A) : m == MASCOT_WATER ? hex(0x3CB4FF) : hex(0xFF4FD8);
         float gs = back.width * 0.9f;
         DrawTexturePro(s_glow, (Rectangle){ 0, 0, 32, 32 },
                        (Rectangle){ back.x + back.width * 0.5f - gs * 0.5f, back.y + back.height * 0.5f - gs * 0.5f, gs, gs },

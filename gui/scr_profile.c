@@ -1,5 +1,6 @@
 /* scr_profile.c - Player names and avatars before a match (SCENE_PROFILE, BG_MENU).
- * PvE: one card (Player 1, plays Fire). PvP: two cards (P1 Fire, P2 Water).
+ * PvE: Player 1 (plays Fire) plus a read-only card for the computer champion of the chosen difficulty.
+ * PvP: two cards (P1 Fire, P2 Water).
  * Layout follows docs/DESIGN.md section 5 "Profile". */
 #include <stdbool.h>
 #include <stdio.h>
@@ -19,6 +20,9 @@
 #define CARD_H        496
 #define CARD_Y        100
 #define CARD_GAP      48
+#define OPP_PX        240         /* champion portrait on the opponent card */
+#define OPP_NAME_Y    352
+#define OPP_TITLE_Y   404
 #define INNER_X       20          /* card padding for controls */
 #define INNER_W       360
 #define AVATAR_PX     144
@@ -111,6 +115,26 @@ static void draw_card(int p, float x, float t)
     }
 }
 
+/* Read-only card for the computer champion (no avatar picker, no name box). */
+static void draw_opponent_card(float x, float t)
+{
+    Settings *s = &g_app.settings;
+    Rectangle r = { x, CARD_Y, CARD_W, CARD_H };
+    int champ = game_champion_avatar(s->last_diff);
+    ui_panel(r);
+    DrawRectangleLinesEx(r, 3, COL_WATER);
+
+    text_draw_aligned(tr(S_OPPONENT), r.x + r.width / 2, r.y + SP_2, FS_H2, COL_GOLD, 1);
+    text_draw_aligned(tr(S_PLAYS_WATER), r.x + r.width / 2, r.y + SP_2 + FS_H2 + 4, FS_SMALL, COL_WATER, 1);
+
+    art_draw_avatar(champ, (Rectangle){ r.x + (r.width - OPP_PX) / 2, r.y + AVATAR_Y, OPP_PX, OPP_PX }, t);
+    text_draw_aligned(tr((StrId)(S_CHAMP_EASY + s->last_diff)), r.x + r.width / 2, r.y + OPP_NAME_Y,
+                      FS_H2, COL_TEXT, 1);
+    text_draw_wrapped(tr((StrId)(S_CHAMP_EASY_TITLE + s->last_diff)),
+                      (Rectangle){ r.x + INNER_X, r.y + OPP_TITLE_Y, INNER_W, 2 * FS_SMALL + 8 },
+                      FS_SMALL, COL_TEXT_DIM, 1);
+}
+
 static void enter(void)
 {
     Settings *s = &g_app.settings;
@@ -175,13 +199,10 @@ static void draw(void)
 
     text_draw_aligned(tr(S_PROFILE_TITLE), VIRTUAL_W / 2.0f, TITLE_Y, FS_H1, COL_GOLD, 1);
 
-    if (pve) {
-        draw_card(0, (VIRTUAL_W - CARD_W) / 2.0f, t);
-    } else {
-        float x1 = (VIRTUAL_W - 2 * CARD_W - CARD_GAP) / 2.0f;
-        draw_card(0, x1, t);
-        draw_card(1, x1 + CARD_W + CARD_GAP, t);
-    }
+    float x1 = (VIRTUAL_W - 2 * CARD_W - CARD_GAP) / 2.0f;
+    draw_card(0, x1, t);
+    if (pve) draw_opponent_card(x1 + CARD_W + CARD_GAP, t);
+    else draw_card(1, x1 + CARD_W + CARD_GAP, t);
 
     float btn_x0 = (VIRTUAL_W - (2 * BTN_W + BTN_GAP)) / 2.0f;
     bool back = ui_button((Rectangle){ btn_x0, BTN_Y, BTN_W, ROW_CHOICE_H }, tr(S_BACK), BTN_NORMAL);
