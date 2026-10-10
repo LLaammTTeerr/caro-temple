@@ -8,6 +8,7 @@
 #include "../core/i18n.h"
 
 void tui_draw_mascot(int x, int y, int avatar, TColor bg, bool bob, bool flicker); /* tui_menu.c */
+void tui_fx_frame(int key, int cols, int rows);  /* tui_menu.c: screen/popup wipe, call last */
 
 enum { POP_NONE, POP_PAUSE, POP_UNDO, POP_SURRENDER, POP_LEAVE, POP_AFK, POP_OVER };
 enum { PAUSE_RESUME, PAUSE_SAVE, PAUSE_UNDO, PAUSE_SETTINGS, PAUSE_SURRENDER, PAUSE_HOME };
@@ -18,7 +19,8 @@ enum { OVER_REMATCH, OVER_HOME };
 #define MAX_PITEMS 8
 #define HUD_CARD_W 20
 #define HUD_CARD_H 15
-#define BTN_W 18
+#define BTN_W 16
+#define BAR_N 4                /* bottom bar: undo, surrender, menu, home */
 
 typedef struct {
     int id;
@@ -41,6 +43,8 @@ static double flash_until;     /* term_now() deadline for the red invalid-move f
 static bool ai_pending;
 static double ai_wait;
 static double over_timer;
+static TColor g_bg = TC_BG;    /* this frame's board backdrop (depends on the board size) */
+static int bar_hot = -1;       /* bottom bar button under the mouse pointer, -1 none */
 
 static bool seen_valid;       /* identifies the match the visual state belongs to */
 static int64_t seen_start;
@@ -155,6 +159,7 @@ static void track_match(void)
 static void open_popup(int p)
 {
     popup = p;
+    bar_hot = -1;
     /* destructive confirmations default to "No" so a stray Enter does nothing */
     pfocus = (p == POP_SURRENDER || p == POP_LEAVE) ? 1 : 0;
 }
@@ -420,14 +425,16 @@ static void popup_key(const TermEvent *ev)
     }
 }
 
+/* Hover moves the popup focus onto the button under the pointer; a left click activates it. */
 static void popup_mouse(const TermEvent *ev)
 {
-    if (ev->mkind != TM_PRESS || ev->mbutton != 0) return;
+    bool press = ev->mkind == TM_PRESS && ev->mbutton == 0;
+    if (ev->mkind != TM_MOVE && !press) return;
     for (int i = 0; i < npit; i++) {
         if (!pit[i].enabled) continue;
         if (ev->mx >= pit[i].x && ev->mx < pit[i].x + pit[i].w && ev->my == pit[i].y) {
             pfocus = i;
-            popup_activate(i);
+            if (press) popup_activate(i);
             return;
         }
     }
@@ -481,29 +488,45 @@ static void board_click(Pos p)
     place_at(idx, p);
 }
 
-/* Bottom bar buttons: 0 undo, 1 surrender, 2 menu. */
+/* Bottom bar buttons: 0 undo, 1 surrender, 2 menu (pause), 3 home (leave confirm). */
 static bool button_rect(int i, int *x, int *y)
 {
     int cols, rows;
     term_size(&cols, &rows);
-    int total = 3 * BTN_W + 2 * 2;
+    int total = BAR_N * BTN_W + (BAR_N - 1) * 2;
     *x = (cols - total) / 2 + i * (BTN_W + 2);
     *y = rows - 7;
     return true;
 }
 
-static void bar_click(int mx, int my)
+static int bar_index(int mx, int my)
 {
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < BAR_N; i++) {
         int x, y;
         button_rect(i, &x, &y);
-        if (my == y && mx >= x && mx < x + BTN_W) {
-            if (i == 0) request_undo_now();
-            else if (i == 1) open_surrender();
-            else open_popup(POP_PAUSE);
-            return;
-        }
+        if (my == y && mx >= x && mx < x + BTN_W) return i;
     }
+    return -1;
+}
+
+static void bar_click(int mx, int my)
+{
+    int i = bar_index(mx, my);
+    if (i == 0) request_undo_now();
+    else if (i == 1) open_surrender();
+    else if (i == 2) open_popup(POP_PAUSE);
+    else if (i == 3) open_popup(POP_LEAVE);
+}
+
+/* Hover (no popup open): highlights the bottom-bar button under the pointer and moves the
+ * human's cursor onto the cell under it (PvE: the human is always player 0; PvP: the player to
+ * move). Pure visual; does not place a stone and does not count as activity. */
+static void game_hover(int mx, int my)
+{
+    Game *g = &g_tui.game;
+    Pos p;
+    bar_hot = bar_index(mx, my);
+    if (g->status == GS_PLAYING && cell_at(mx, my, &p)) cur[is_pve() ? 0 : g->turn] = p;
 }
 
 /* ---------------------------------------------------------------- public API */
@@ -524,7 +547,6 @@ void tui_game_event(const TermEvent *ev)
     Game *g = &g_tui.game;
     if (ev->type == TEV_MOUSE) {
         if (ev->mkind == TM_PRESS || ev->mkind == TM_WHEEL_UP || ev->mkind == TM_WHEEL_DOWN) game_activity(g);
-        if (ev->mkind != TM_PRESS || ev->mbutton != 0) return;
         int cols, rows;
         term_size(&cols, &rows);
         if (popup != POP_NONE) {
@@ -532,6 +554,8 @@ void tui_game_event(const TermEvent *ev)
             popup_mouse(ev);
             return;
         }
+        if (ev->mkind == TM_MOVE) { game_hover(ev->mx, ev->my); return; }
+        if (ev->mkind != TM_PRESS || ev->mbutton != 0) return;
         Pos p;
         if (cell_at(ev->mx, ev->my, &p)) board_click(p);
         else bar_click(ev->mx, ev->my);
@@ -556,11 +580,13 @@ void tui_game_update(double dt)
     game_tick(g, dt, popup == POP_NONE);
 
     if (g->afk == AFK_TIMEOUT) {
+        int free_slot = storage_first_free_slot();     /* -1: every slot is taken before saving */
         int slot = storage_autosave_slot();
         bool ok = slot >= 0 && storage_save_game(slot, g);
         char b[120];
         if (ok) {
-            snprintf(b, sizeof b, tr(S_AFK_SAVED_FMT), slot + 1);
+            if (free_slot < 0) snprintf(b, sizeof b, tr(S_AFK_OVERWROTE_FMT), slot + 1);
+            else snprintf(b, sizeof b, tr(S_AFK_SAVED_FMT), slot + 1);
             tui_toast(b);
         } else {
             tui_toast(tr(S_LOAD_FAILED));
@@ -600,6 +626,62 @@ void tui_game_update(double dt)
 
 /* ---------------------------------------------------------------- drawing */
 
+/* Player (0/1) who made the move at p; the highlight may point at either side in PvE. */
+static int owner_of(const Game *g, Pos p)
+{
+    for (int i = g->move_count - 1; i >= 0; i--)
+        if (g->moves[i].r == p.r && g->moves[i].c == p.c) return i % 2;
+    return 0;
+}
+
+/* ---------------------------------------------------------------- backdrop */
+
+/* Per-board backdrop (PRD: every board size has its own background). Painted first; the HUD
+ * cards and the board are drawn over it, so the decorations only show in the free margins.
+ * Decorations are dim and sparse so the text keeps its contrast. Animated unless reduced motion. */
+static TColor backdrop_color(int n)
+{
+    if (n == 3) return 0x2B1410u;   /* Fire Shrine: dark ember red-brown */
+    if (n == 5) return 0x10261Au;   /* Forest Temple: dark moss green */
+    return 0x0B1F3Au;               /* Water Sanctum: deep blue */
+}
+
+static void draw_backdrop(int cols, int rows, int n)
+{
+    int tick = g_tui.settings.reduced_motion ? 0 : (int)(term_now() * 4.0);
+    g_bg = backdrop_color(n);
+    term_fill(0, 0, cols, rows, ' ', TC_TEXT, g_bg);
+    if (n == 3) {
+        /* ember dots: about 1 cell in 32, each flickering between two embers */
+        for (int y = 0; y < rows; y++) {
+            for (int x = 0; x < cols; x++) {
+                uint32_t h = (uint32_t)(x * 73u + y * 151u) * 2654435761u;
+                if ((h >> 27) != 0) continue;
+                TColor fg = ((((h >> 8) & 3u) + (uint32_t)tick) & 1u) ? 0xE2642Cu : 0x7A2F14u;
+                term_put(x, y, 0x2022u, fg, g_bg, 0);            /* • */
+            }
+        }
+    } else if (n == 5) {
+        /* vines hanging down both margins, swaying slowly */
+        for (int y = 0; y < rows; y++) {
+            int s = y + tick / 3;
+            uint32_t cp = (s & 2) ? 0x2503u : 0x257Fu;          /* ┃ / ╿ */
+            TColor fg = (s & 1) ? 0x3F8C45u : 0x2E6B34u;
+            term_put(0, y, cp, fg, g_bg, 0);
+            term_put(cols - 1, y, cp, fg, g_bg, 0);
+        }
+    } else {
+        /* falling water: dashed columns at both margins, moving downwards */
+        for (int y = 0; y < rows; y++) {
+            for (int side = 0; side < 2; side++) {
+                int x = side ? cols - 1 : 0;
+                int ph = ((y - tick + side * 2) % 4 + 4) % 4;
+                if (ph == 0) term_put(x, y, 0x250Au, side ? 0x5FB8E8u : 0x2A6FA8u, g_bg, 0);   /* ┊ */
+            }
+        }
+    }
+}
+
 static void draw_board(void)
 {
     Game *g = &g_tui.game;
@@ -607,7 +689,7 @@ static void draw_board(void)
     board_geo(&bx, &by, &bw, &bh, &cw, &ch, &sep);
     int n = g->board.n;
     Pos last;
-    bool has_last = game_last_move(g, &last);
+    bool has_last = game_highlight_move(g, &last);
     bool anim = !g_tui.settings.reduced_motion;
     double now = term_now();
     for (int r = 0; r < n; r++) {
@@ -620,7 +702,7 @@ static void draw_board(void)
                 for (int k = 0; k < g->win_line.len; k++)
                     if (g->win_line.cells[k].r == r && g->win_line.cells[k].c == c) is_win = true;
             bool flashing = flash_until > now && flash_cell.r == r && flash_cell.c == c;
-            TColor bg = TC_BG;
+            TColor bg = g_bg;
             if (flashing) bg = TC_DANGER;
             else if (is_win) bg = TC_MOSS;
             else if (is_last) bg = TC_GOLD;
@@ -659,16 +741,16 @@ static void draw_board(void)
         for (int k = 1; k < n; k++) {
             int xs = bx + k * (cw + 1) - 1;
             for (int y = by; y < by + bh; y++)
-                if ((y - by) % (ch + 1) != ch) term_put(xs, y, 0x2502u, TC_BORDER, TC_BG, 0);
+                if ((y - by) % (ch + 1) != ch) term_put(xs, y, 0x2502u, TC_BORDER, g_bg, 0);
         }
         for (int k = 1; k < n; k++) {
             int ys = by + k * (ch + 1) - 1;
             for (int x = bx; x < bx + bw; x++)
-                if ((x - bx) % (cw + 1) != cw) term_put(x, ys, 0x2500u, TC_BORDER, TC_BG, 0);
+                if ((x - bx) % (cw + 1) != cw) term_put(x, ys, 0x2500u, TC_BORDER, g_bg, 0);
         }
         for (int i = 1; i < n; i++)
             for (int j = 1; j < n; j++)
-                term_put(bx + i * (cw + 1) - 1, by + j * (ch + 1) - 1, 0x253Cu, TC_BORDER, TC_BG, 0);
+                term_put(bx + i * (cw + 1) - 1, by + j * (ch + 1) - 1, 0x253Cu, TC_BORDER, g_bg, 0);
     }
     /* cursors: P1 (fire) top corners, P2 (water) bottom corners; 10x10 uses [ and ] */
     int nc = is_pve() ? 1 : 2;
@@ -676,14 +758,14 @@ static void draw_board(void)
         int x = bx + cur[p].c * (cw + sep), y = by + cur[p].r * (ch + sep);
         TColor col = p == 0 ? TC_FIRE : TC_WATER;
         if (ch == 1) {
-            term_put(x, y, '[', col, TC_BG, TATTR_BOLD);
-            term_put(x + cw - 1, y, ']', col, TC_BG, TATTR_BOLD);
+            term_put(x, y, '[', col, g_bg, TATTR_BOLD);
+            term_put(x + cw - 1, y, ']', col, g_bg, TATTR_BOLD);
         } else if (p == 0) {
-            term_put(x, y, 0x250Cu, col, TC_BG, TATTR_BOLD);
-            term_put(x + cw - 1, y, 0x2510u, col, TC_BG, TATTR_BOLD);
+            term_put(x, y, 0x250Cu, col, g_bg, TATTR_BOLD);
+            term_put(x + cw - 1, y, 0x2510u, col, g_bg, TATTR_BOLD);
         } else {
-            term_put(x, y + ch - 1, 0x2514u, col, TC_BG, TATTR_BOLD);
-            term_put(x + cw - 1, y + ch - 1, 0x2518u, col, TC_BG, TATTR_BOLD);
+            term_put(x, y + ch - 1, 0x2514u, col, g_bg, TATTR_BOLD);
+            term_put(x + cw - 1, y + ch - 1, 0x2518u, col, g_bg, TATTR_BOLD);
         }
     }
     /* invalid-move flash and win line are drawn through bg above */
@@ -724,16 +806,16 @@ static void draw_header(int cols)
         char hm[16] = "--:--";
         if (tmv) strftime(hm, sizeof hm, "%H:%M", tmv);
         snprintf(b, sizeof b, tr(S_STARTED_AT_FMT), hm);
-        term_print(2, 0, b, TC_DIM, TC_BG, 0);
+        term_print(2, 0, b, TC_DIM, g_bg, 0);
     }
     int el = (int)g->elapsed;
     snprintf(b, sizeof b, "%s %02d:%02d", tr(S_ELAPSED), el / 60, el % 60);
-    term_print(cols - 2 - utf8_cell_width(b), 0, b, TC_DIM, TC_BG, 0);
+    term_print(cols - 2 - utf8_cell_width(b), 0, b, TC_DIM, g_bg, 0);
     if (g->status == GS_OVER) {
-        put_centred(0, cols, 0, tr(S_GAME_OVER), TC_GOLD, TC_BG, TATTR_BOLD);
+        put_centred(0, cols, 0, tr(S_GAME_OVER), TC_GOLD, g_bg, TATTR_BOLD);
     } else {
         snprintf(b, sizeof b, tr(S_TURN_FMT), g->players[g->turn].name);
-        put_centred(0, cols, 0, b, g->turn == 0 ? TC_FIRE_HI : TC_WATER_HI, TC_BG, TATTR_BOLD);
+        put_centred(0, cols, 0, b, g->turn == 0 ? TC_FIRE_HI : TC_WATER_HI, g_bg, TATTR_BOLD);
     }
 }
 
@@ -744,45 +826,47 @@ static void draw_side_info(int cols, int rows)
     char b[64];
     int lx = 2, y = 2 + HUD_CARD_H + 1;
     snprintf(b, sizeof b, "%d x %d", g->board.n, g->board.n);
-    term_print(lx, y, b, TC_DIM, TC_BG, 0);
+    term_print(lx, y, b, TC_DIM, g_bg, 0);
     snprintf(b, sizeof b, tr(S_MOVES_FMT), g->move_count);
-    term_print(lx, y + 1, b, TC_DIM, TC_BG, 0);
-    term_print(lx, y + 2, tr(is_pve() ? S_MODE_PVE : S_MODE_PVP), TC_DIM, TC_BG, 0);
+    term_print(lx, y + 1, b, TC_DIM, g_bg, 0);
+    term_print(lx, y + 2, tr(is_pve() ? S_MODE_PVE : S_MODE_PVP), TC_DIM, g_bg, 0);
     if (is_pve()) {
         term_print(lx, y + 3, tr(g->diff == DIFF_EASY ? S_DIFF_EASY :
-                                 (g->diff == DIFF_HARD ? S_DIFF_HARD : S_DIFF_MEDIUM)), TC_DIM, TC_BG, 0);
+                                 (g->diff == DIFF_HARD ? S_DIFF_HARD : S_DIFF_MEDIUM)), TC_DIM, g_bg, 0);
     }
     if (g->board.n >= 5) {
         snprintf(b, sizeof b, "%s: %s", tr(S_RULE_BLOCKED), tr(g->board.block_rule ? S_ON : S_OFF));
-        term_print(lx, y + 4, b, TC_DIM, TC_BG, 0);
+        term_print(lx, y + 4, b, TC_DIM, g_bg, 0);
     }
     int rx = cols - 1 - HUD_CARD_W;
-    term_print(rx, y, tr(S_LAST_MOVE), TC_DIM, TC_BG, 0);
+    term_print(rx, y, tr(S_LAST_MOVE), TC_DIM, g_bg, 0);
     Pos lm;
-    if (game_last_move(g, &lm)) {
-        int who = (g->move_count - 1) % 2;
-        snprintf(b, sizeof b, "%c%d  %s", 'A' + lm.c, lm.r + 1, g->players[who].name);
-        term_print(rx, y + 1, b, who == 0 ? TC_FIRE_HI : TC_WATER_HI, TC_BG, 0);
+    if (game_highlight_move(g, &lm)) {
+        int who = owner_of(g, lm);
+        snprintf(b, sizeof b, "%c%d  %.*s", 'A' + lm.c, lm.r + 1, PLAYER_NAME_MAX - 1, g->players[who].name);
+        term_print(rx, y + 1, b, who == 0 ? TC_FIRE_HI : TC_WATER_HI, g_bg, 0);
     }
 }
 
 static void draw_bottom_bar(int cols, int rows)
 {
     Game *g = &g_tui.game;
-    int labels_ok = g->status == GS_PLAYING;
-    const char *labels[3];
-    char ub[40], sb[40], mb[40];
-    snprintf(ub, sizeof ub, "[U] %s", tr(S_UNDO));
-    snprintf(sb, sizeof sb, "[G] %s", tr(S_SURRENDER));
-    snprintf(mb, sizeof mb, "[Esc] %s", tr(S_MENU));
-    labels[0] = ub; labels[1] = sb; labels[2] = mb;
-    bool can_undo = labels_ok && game_can_request_undo(g, undo_requester());
-    for (int i = 0; i < 3; i++) {
+    bool playing = g->status == GS_PLAYING;
+    char lbl[BAR_N][40];
+    snprintf(lbl[0], sizeof lbl[0], "[U] %s", tr(S_UNDO));
+    snprintf(lbl[1], sizeof lbl[1], "[G] %s", tr(S_SURRENDER));
+    snprintf(lbl[2], sizeof lbl[2], "[Esc] %s", tr(S_MENU));
+    snprintf(lbl[3], sizeof lbl[3], "[\xE2\x8C\x82 %s]", tr(S_HOME));
+    bool can_undo = playing && game_can_request_undo(g, undo_requester());
+    for (int i = 0; i < BAR_N; i++) {
         int x, y;
         button_rect(i, &x, &y);
-        bool enabled = i == 2 || (i == 0 ? can_undo : labels_ok);
-        term_fill(x, y, BTN_W, 1, ' ', TC_TEXT, TC_PANEL);
-        put_centred(x, BTN_W, y, labels[i], enabled ? (i == 1 ? TC_DANGER : TC_TEXT) : TC_BORDER, TC_PANEL, 0);
+        bool enabled = i >= 2 || (i == 0 ? can_undo : playing);
+        bool hot = enabled && i == bar_hot;
+        TColor bgc = hot ? 0x3D4329u : TC_PANEL;
+        TColor fg = !enabled ? TC_BORDER : (hot ? TC_GOLD : (i == 1 ? TC_DANGER : TC_TEXT));
+        term_fill(x, y, BTN_W, 1, ' ', fg, bgc);
+        put_centred(x, BTN_W, y, lbl[i], fg, bgc, hot ? TATTR_BOLD : 0);
     }
     (void)cols; (void)rows;
 }
@@ -830,6 +914,7 @@ void tui_game_draw(void)
     int cols, rows;
     term_size(&cols, &rows);
     Game *g = &g_tui.game;
+    draw_backdrop(cols, rows, g->board.n);
     draw_header(cols);
     draw_player_card(1, 2, 0);
     draw_player_card(cols - 1 - HUD_CARD_W, 2, 1);
@@ -837,10 +922,10 @@ void tui_game_draw(void)
     draw_side_info(cols, rows);
     draw_bottom_bar(cols, rows);
     put_centred(0, cols, rows - 2,
-                tr(is_pve() ? S_HINT_GAME_PVE : S_HINT_GAME_PVP), TC_DIM, TC_BG, 0);
-    (void)g;
+                tr(is_pve() ? S_HINT_GAME_PVE : S_HINT_GAME_PVP), TC_DIM, g_bg, 0);
     if (popup != POP_NONE) {
         popup_build(cols, rows);
         draw_popup();
     }
+    tui_fx_frame(1000 + popup, cols, rows);
 }

@@ -22,6 +22,7 @@ enum { SU_MODE, SU_BOARD, SU_DIFF, SU_RULE, SU_BACK, SU_NEXT };
 enum { PF_AV0, PF_NAME0, PF_AV1, PF_NAME1, PF_BACK, PF_START };
 enum { ST_LANG, ST_MUSIC, ST_MUTE_MUSIC, ST_SFX, ST_MUTE_SFX, ST_MOTION, ST_BACK };
 #define SV_BACK 10              /* save slots use ids 0..SAVE_SLOTS-1 */
+#define ID_HOME 20              /* "[⌂ Home]" top-left on every non-home screen (added last) */
 
 typedef struct {
     int id;
@@ -45,6 +46,7 @@ static int mfocus;          /* 0 = yes/first button, 1 = no/second */
 static bool editing;        /* typing into a text field */
 static bool home_has_save;  /* cached at HOME enter */
 static SlotInfo slots[SAVE_SLOTS];
+static char home_lbl[48];   /* label of the top-left Home button (MItem keeps a pointer) */
 
 /* ---------------------------------------------------------------- mascots */
 
@@ -382,6 +384,14 @@ static void build_saves(int cols, int rows)
     add_item(SV_BACK, MI_BUTTON, tr(S_BACK), cols / 2 - 9, 27, 18, 1, true);
 }
 
+/* Home button: top-left corner row 0, keyboard-reachable (Up from the first row) and clickable.
+ * Added last so the earlier item indices (slots 0..9 on SAVES) keep their meaning. */
+static void add_home(void)
+{
+    snprintf(home_lbl, sizeof home_lbl, "[\xE2\x8C\x82 %s]", tr(S_HOME));
+    add_item(ID_HOME, MI_BUTTON, home_lbl, 2, 0, utf8_cell_width(home_lbl) + 2, 1, true);
+}
+
 static void build(void)
 {
     int cols, rows;
@@ -389,10 +399,10 @@ static void build(void)
     nitems = 0;
     switch (g_tui.screen) {
     case TS_HOME: build_home(cols, rows); break;
-    case TS_SETUP: build_setup(cols, rows); break;
-    case TS_PROFILE: build_profile(cols, rows); break;
-    case TS_SETTINGS: build_settings(cols, rows); break;
-    case TS_SAVES: build_saves(cols, rows); break;
+    case TS_SETUP: build_setup(cols, rows); add_home(); break;
+    case TS_PROFILE: build_profile(cols, rows); add_home(); break;
+    case TS_SETTINGS: build_settings(cols, rows); add_home(); break;
+    case TS_SAVES: build_saves(cols, rows); add_home(); break;
     default: break;
     }
     fix_focus();
@@ -602,6 +612,7 @@ static void adjust(int id, int dir)
 
 static void button_action(int id)
 {
+    if (id == ID_HOME) { tui_goto(TS_HOME); return; }
     switch (g_tui.screen) {
     case TS_HOME:
         switch (id) {
@@ -719,6 +730,30 @@ static void menu_mouse(const TermEvent *ev)
     }
 }
 
+/* Hover (any-motion mouse): the item under the pointer takes focus, so it is highlighted
+ * exactly like keyboard focus. Clicks still come from menu_mouse. */
+static void menu_hover(const TermEvent *ev)
+{
+    int cols, rows;
+    term_size(&cols, &rows);
+    if (modal != MODAL_NONE) {
+        for (int i = 0; i < 2; i++) {
+            int x, y, w;
+            modal_btn(cols, rows, i, &x, &y, &w);
+            if (ev->mx >= x && ev->mx < x + w && ev->my == y) { mfocus = i; return; }
+        }
+        return;
+    }
+    if (editing) return;          /* do not steal focus from a text field being typed in */
+    for (int i = 0; i < nitems; i++) {
+        const MItem *m = &items[i];
+        if (!m->enabled) continue;
+        if (ev->mx < m->x || ev->mx >= m->x + m->w || ev->my < m->y || ev->my >= m->y + m->h) continue;
+        focus = i;
+        return;
+    }
+}
+
 static void modal_key(const TermEvent *ev)
 {
     int pl = -1;
@@ -747,7 +782,11 @@ void tui_menu_enter(TuiScreen s)
 void tui_menu_event(const TermEvent *ev)
 {
     build();
-    if (ev->type == TEV_MOUSE) { menu_mouse(ev); return; }
+    if (ev->type == TEV_MOUSE) {
+        if (ev->mkind == TM_MOVE) menu_hover(ev);
+        else menu_mouse(ev);
+        return;
+    }
     if (ev->type != TEV_KEY) return;
     if (modal != MODAL_NONE) { modal_key(ev); return; }
     if (editing && edit_key(ev)) return;
@@ -1090,6 +1129,31 @@ static void draw_modal(int cols, int rows)
     }
 }
 
+/* Screen/popup transition: a gold wipe sweeps left to right over the freshly drawn frame,
+ * revealing it. key identifies the view (screen, modal or game popup); a change restarts the
+ * wipe. Time based, never blocks: it only paints a few hundred cells for ~0.25 s (0.1 s with
+ * reduced motion). Called at the end of every screen draw (tui_game.c calls it too). */
+static int fx_key = -2;
+static double fx_t0 = 0.0;
+
+void tui_fx_frame(int key, int cols, int rows)
+{
+    double now = term_now();
+    if (key != fx_key) {
+        fx_key = key;
+        fx_t0 = now;
+    }
+    double dur = g_tui.settings.reduced_motion ? 0.10 : 0.25;
+    double p = (now - fx_t0) / dur;
+    if (p >= 1.0) return;
+    if (p < 0.0) p = 0.0;
+    int edge = (int)(p * cols);
+    for (int x = edge; x < cols; x++)
+        for (int y = 0; y < rows; y++) term_put(x, y, ' ', TC_BG, TC_BG, 0);
+    if (edge < cols)
+        for (int y = 0; y < rows; y++) term_put(edge, y, 0x258Fu, TC_GOLD, TC_BG, 0);   /* ▏ leading edge */
+}
+
 void tui_menu_draw(void)
 {
     int cols, rows;
@@ -1104,4 +1168,5 @@ void tui_menu_draw(void)
     default: break;
     }
     if (modal != MODAL_NONE) draw_modal(cols, rows);
+    tui_fx_frame(100 + g_tui.screen * 4 + modal, cols, rows);
 }
