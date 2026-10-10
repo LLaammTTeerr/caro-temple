@@ -50,6 +50,10 @@ if(CARO_BUILD_TUI)
   target_compile_options(caro_tui PRIVATE ${CARO_WARN})
   if(NOT WIN32)
     target_compile_definitions(caro_tui PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
+    if(APPLE)
+      # _POSIX_C_SOURCE hides SIGWINCH / TIOCGWINSZ on macOS unless Darwin extensions are on.
+      target_compile_definitions(caro_tui PRIVATE _DARWIN_C_SOURCE)
+    endif()
   endif()
 endif()
 
