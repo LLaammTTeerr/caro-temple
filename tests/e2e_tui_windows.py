@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import time
 
 from winpty import PtyProcess  # pip install pywinpty
@@ -22,30 +23,41 @@ KEYS = {"Enter": "\r", "Down": "\x1b[B", "Up": "\x1b[A", "Right": "\x1b[C", "Lef
 env = dict(os.environ, CARO_DATA_DIR=tempfile.mkdtemp(), CARO_AFK_IDLE="600")
 proc = PtyProcess.spawn(EXE, dimensions=(32, 100), env=env)
 seen = ""  # all text received since the last check
+lock = threading.Lock()
+
+
+def reader():
+    """PtyProcess.read() blocks until output arrives, so read on a background thread."""
+    global seen
+    while True:
+        try:
+            data = proc.read(65536)
+        except EOFError:
+            return
+        except Exception:
+            return
+        if data:
+            with lock:
+                seen += ANSI.sub("", data)
+
+
+threading.Thread(target=reader, daemon=True).start()
 
 
 def pump(seconds):
-    global seen
-    end = time.time() + seconds * SCALE
-    while time.time() < end:
-        try:
-            if proc.isalive():
-                data = proc.read(65536)
-                if data:
-                    seen += ANSI.sub("", data)
-                    continue
-        except EOFError:
-            return
-        time.sleep(0.02)
+    time.sleep(seconds * SCALE)
 
 
 def expect(pattern, what):
     global seen
     for _ in range(12):
         pump(0.5)
-        if re.search(pattern, seen):
+        with lock:
+            hit = re.search(pattern, seen)
+            if hit:
+                seen = ""
+        if hit:
             print("ok:", what)
-            seen = ""
             return
     print("E2E TUI (Windows) FAIL:", what, "- wanted", pattern)
     print(seen[-3000:])
@@ -78,7 +90,10 @@ expect(r"2 moves", "Continue resumes the match")
 keys("Home", "Escape")
 expect(r"Quit the game", "quit confirm")
 keys("Left", "Enter")
-pump(1.5)
+for _ in range(10):
+    pump(0.3)
+    if not proc.isalive():
+        break
 if proc.isalive():
     print("E2E TUI (Windows) FAIL: did not quit")
     proc.terminate(force=True)

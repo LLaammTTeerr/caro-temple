@@ -63,6 +63,7 @@ jobs:
 
       - name: GUI end-to-end test (injected keyboard/mouse input)
         if: runner.os == 'Linux'
+        timeout-minutes: 5
         env:
           XINJ_SCALE: "2"
         run: tests/e2e_gui.sh build
@@ -73,6 +74,7 @@ jobs:
 
       - name: Terminal version end-to-end test (tmux)
         if: runner.os != 'Windows'
+        timeout-minutes: 5
         env:
           XINJ_SCALE: "2"
         run: |
@@ -109,6 +111,7 @@ jobs:
 
       - name: Terminal version end-to-end test (Windows ConPTY)
         if: runner.os == 'Windows'
+        timeout-minutes: 5
         env:
           XINJ_SCALE: "2"
         run: |
