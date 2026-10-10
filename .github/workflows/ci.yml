@@ -34,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libgl1-mesa-dev libasound2-dev xvfb
+            libgl1-mesa-dev libasound2-dev libxtst6 xvfb
 
       - name: Configure
         shell: bash
@@ -60,6 +60,10 @@ jobs:
             xvfb-run -a -s "-screen 0 1280x720x24" ./caro --scene $s --frames 30 --shot "$RUNNER_TEMP/$s.png"
             test -s "$RUNNER_TEMP/$s.png"
           done
+
+      - name: GUI end-to-end test (injected keyboard/mouse input)
+        if: runner.os == 'Linux'
+        run: tests/e2e_gui.sh build
 
       - name: Upload screenshots
         if: runner.os == 'Linux' && matrix.cc == 'gcc'
