@@ -1,7 +1,11 @@
 /* storage.c - settings, player profiles and 10 manual save slots as small text files.
  * Files: <dir>/settings.cfg and <dir>/slot01.sav .. slot10.sav. Each starts with a magic
  * header line, followed by key=value lines. Unknown keys are ignored. Writes are atomic
- * (write <file>.tmp, then rename over the target). */
+ * (write <file>.tmp, flush to disk, then replace the target). A save file is complete only
+ * if it carries a `moves=<count>` header and a final `end=1` line; anything else is rejected. */
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#endif
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -10,22 +14,29 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
+/* storage.h before <windows.h>: windows.h defines an S_OK macro that clashes with i18n.h */
+#include "storage.h"
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #include <direct.h>
+#include <io.h>
 #define CARO_MKDIR(p) _mkdir(p)
 #define IS_SEP(c) ((c) == '/' || (c) == '\\')
 #else
-#include <sys/stat.h>
+#include <unistd.h>
 #define CARO_MKDIR(p) mkdir((p), 0755)
 #define IS_SEP(c) ((c) == '/')
 #endif
-#include "storage.h"
 
 #define DIR_CAP 1024
 #define PATH_CAP 1200
 #define LINE_CAP 1024
 #define SETTINGS_MAGIC "CARO-SETTINGS 1"
-#define SAVE_MAGIC "CARO-SAVE 1"
+#define SAVE_MAGIC "CARO-SAVE 2"
 #define SETTINGS_FILE "settings.cfg"
 
 static char g_dir[DIR_CAP];
@@ -54,10 +65,12 @@ static bool join_dir(char *out, const char *base, const char *tail)
     return n > 0 && n < DIR_CAP;
 }
 
+/* Platform default. An over-long CARO_DATA_DIR is ignored (not truncated), so the normal
+ * OS location is used instead of a surprising one. */
 static bool resolve_default(char *out)
 {
     const char *env = getenv("CARO_DATA_DIR");
-    if (env && *env) return copy_dir(out, env);
+    if (env && *env && copy_dir(out, env)) return true;
 #ifdef _WIN32
     {
         const char *app = getenv("APPDATA");
@@ -79,12 +92,14 @@ static bool resolve_default(char *out)
 #endif
 }
 
+/* Empty when no data directory can be resolved (no HOME/APPDATA): file operations then fail
+ * cleanly instead of writing into the current working directory. */
 const char *storage_dir(void)
 {
     if (g_has_override) {
         strcpy(g_dir, g_override);
     } else if (!resolve_default(g_dir)) {
-        strcpy(g_dir, "caro");
+        g_dir[0] = '\0';
     }
     return g_dir;
 }
@@ -106,6 +121,7 @@ static void ensure_dir(void)
     char buf[DIR_CAP];
     char *p;
     strcpy(buf, storage_dir());
+    if (buf[0] == '\0') return;
     for (p = buf + 1; *p; p++) {
         if (IS_SEP(*p)) {
             char sep = *p;
@@ -119,7 +135,9 @@ static void ensure_dir(void)
 
 static bool build_path(char *out, const char *name)
 {
-    int n = snprintf(out, PATH_CAP, "%s/%s", storage_dir(), name);
+    int n;
+    if (storage_dir()[0] == '\0') return false;
+    n = snprintf(out, PATH_CAP, "%s/%s", g_dir, name);
     return n > 0 && n < PATH_CAP;
 }
 
@@ -137,17 +155,39 @@ static bool tmp_path_of(char *out, const char *path)
     return n > 0 && n < PATH_CAP;
 }
 
-/* Move a fully written .tmp file over the target. */
+/* Close a freshly written .tmp file. True only if every write, the flush to disk and the
+ * close succeeded. The file is closed in all cases. */
+static bool finish_write(FILE *f)
+{
+    bool ok = !ferror(f);
+    if (ok && fflush(f) != 0) ok = false;
+    if (ok) {
+#ifdef _WIN32
+        ok = _commit(_fileno(f)) == 0;
+#else
+        ok = fsync(fileno(f)) == 0;
+#endif
+    }
+    if (fclose(f) != 0) ok = false;
+    return ok;
+}
+
+/* Move a fully written .tmp file over the target, replacing it atomically. */
 static bool commit_file(const char *tmp, const char *path)
 {
 #ifdef _WIN32
-    remove(path); /* rename does not replace existing files on Windows */
-#endif
+    if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        remove(tmp);
+        return false;
+    }
+    return true;
+#else
     if (rename(tmp, path) != 0) {
         remove(tmp);
         return false;
     }
     return true;
+#endif
 }
 
 /* ---------- text helpers ---------- */
@@ -256,6 +296,7 @@ static bool text_decode(const char *in, char *out, size_t cap)
             int lo = hi < 0 ? -1 : hex_value(in[2]);
             if (lo < 0) return false;
             c = (char)(hi * 16 + lo);
+            if (c == '\0') return false; /* an embedded NUL is never written by put_text */
             in += 3;
         } else {
             c = *in++;
@@ -393,8 +434,7 @@ bool settings_save(const Settings *s)
     fprintf(f, "last_board=%d\n", s->last_board);
     fprintf(f, "last_diff=%d\n", (int)s->last_diff);
     write_flag(f, "block_rule", s->block_rule);
-    ok = !ferror(f);
-    if (fclose(f) != 0) ok = false;
+    ok = finish_write(f);
     if (!ok) {
         remove(tmp);
         return false;
@@ -404,9 +444,10 @@ bool settings_save(const Settings *s)
 
 /* ---------- game validation ---------- */
 
+/* A player name must be non-empty and NUL-terminated within its buffer. */
 static bool name_ok(const char *name)
 {
-    return memchr(name, '\0', PLAYER_NAME_MAX) != NULL;
+    return name[0] != '\0' && memchr(name, '\0', PLAYER_NAME_MAX) != NULL;
 }
 
 /* Rebuild g->board by replaying the move list and check that the whole game is consistent:
@@ -495,9 +536,9 @@ enum {
     K_P1NAME = 1u << 4, K_P1AV = 1u << 5, K_P2NAME = 1u << 6, K_P2AV = 1u << 7,
     K_AI = 1u << 8, K_TURN = 1u << 9, K_CLOCK1 = 1u << 10, K_CLOCK2 = 1u << 11,
     K_START = 1u << 12, K_ELAPSED = 1u << 13, K_STATUS = 1u << 14, K_REASON = 1u << 15,
-    K_WINNER = 1u << 16, K_SAVED = 1u << 17
+    K_WINNER = 1u << 16, K_SAVED = 1u << 17, K_MOVES = 1u << 18, K_END = 1u << 19
 };
-#define K_ALL ((1u << 18) - 1u)
+#define K_ALL ((1u << 20) - 1u)
 #define MOVE_COORD_LIMIT 1000
 
 static bool load_game_file(const char *path, Game *out, int64_t *saved_at)
@@ -509,7 +550,9 @@ static bool load_game_file(const char *path, Game *out, int64_t *saved_at)
     int board_n = 0;
     bool block = false;
     int64_t saved = 0;
+    long declared_moves = -1;
     int nmoves = 0;
+    bool ended = false;
     bool ok = false;
     int r;
 
@@ -529,9 +572,18 @@ static bool load_game_file(const char *path, Game *out, int64_t *saved_at)
         r = read_line(f, line, sizeof line);
         if (r == 0) break;
         if (r < 0) goto done; /* over-long line: not something we wrote */
+        if (ended) goto done; /* nothing may follow the end marker */
         if (!split_kv(line, &key, &val)) continue;
 
-        if (strcmp(key, "mode") == 0) {
+        if (strcmp(key, "end") == 0) {
+            if (strcmp(val, "1") != 0) goto done;
+            seen |= K_END;
+            ended = true;
+        } else if (strcmp(key, "moves") == 0) {
+            if (!parse_long(val, &lv) || lv < 0 || lv > GAME_MAX_MOVES) goto done;
+            declared_moves = lv;
+            seen |= K_MOVES;
+        } else if (strcmp(key, "mode") == 0) {
             if (!parse_long(val, &lv) || lv < 0 || lv > 1) goto done;
             g.mode = (GameMode)lv;
             seen |= K_MODE;
@@ -609,6 +661,7 @@ static bool load_game_file(const char *path, Game *out, int64_t *saved_at)
         /* unknown keys are ignored */
     }
     if (seen != K_ALL) goto done;
+    if (declared_moves != nmoves) goto done; /* truncated or padded move list */
 
     g.move_count = nmoves;
     g.undo_requester = -1;
@@ -649,8 +702,25 @@ static void write_game_file(FILE *f, const Game *g, int64_t saved_at)
     fprintf(f, "reason=%d\n", (int)g->end_reason);
     fprintf(f, "winner=%d\n", g->winner);
     fprintf(f, "saved=%lld\n", (long long)saved_at);
+    fprintf(f, "moves=%d\n", g->move_count);
     for (i = 0; i < g->move_count; i++)
         fprintf(f, "move=%d,%d\n", g->moves[i].r, g->moves[i].c);
+    fprintf(f, "end=1\n");
+}
+
+/* Stamp for a new save: the current time, but strictly later than every other slot, so
+ * that saves made within the same second still order correctly (latest/autosave). */
+static int64_t next_saved_at(int slot)
+{
+    SlotInfo info[SAVE_SLOTS];
+    int64_t stamp = (int64_t)time(NULL);
+    int i;
+    storage_list_slots(info);
+    for (i = 0; i < SAVE_SLOTS; i++) {
+        if (i == slot || !info[i].used) continue;
+        if (info[i].saved_at >= stamp) stamp = info[i].saved_at + 1;
+    }
+    return stamp;
 }
 
 bool storage_save_game(int slot, const Game *g)
@@ -668,9 +738,8 @@ bool storage_save_game(int slot, const Game *g)
     ensure_dir();
     f = fopen(tmp, "wb");
     if (!f) return false;
-    write_game_file(f, g, (int64_t)time(NULL));
-    ok = !ferror(f);
-    if (fclose(f) != 0) ok = false;
+    write_game_file(f, g, next_saved_at(slot));
+    ok = finish_write(f);
     if (!ok) {
         remove(tmp);
         return false;
@@ -739,6 +808,15 @@ int storage_autosave_slot(void)
     return oldest;
 }
 
+/* File modification time of a slot, or 0 if it cannot be read. Used only to break ties. */
+static time_t slot_mtime(int slot)
+{
+    char path[PATH_CAP];
+    struct stat st;
+    if (!slot_path(path, slot) || stat(path, &st) != 0) return 0;
+    return st.st_mtime;
+}
+
 int storage_latest_slot(void)
 {
     SlotInfo info[SAVE_SLOTS];
@@ -746,7 +824,14 @@ int storage_latest_slot(void)
     storage_list_slots(info);
     for (i = 0; i < SAVE_SLOTS; i++) {
         if (!info[i].used) continue;
-        if (latest < 0 || info[i].saved_at > info[latest].saved_at) latest = i;
+        if (latest < 0 || info[i].saved_at > info[latest].saved_at) {
+            latest = i;
+        } else if (info[i].saved_at == info[latest].saved_at &&
+                   slot_mtime(i) > slot_mtime(latest)) {
+            /* same stamp (e.g. files written by hand): the most recently written wins;
+             * if that is also equal, the lower slot index is kept (deterministic) */
+            latest = i;
+        }
     }
     return latest;
 }
