@@ -52,17 +52,19 @@ static char home_lbl[48];   /* label of the top-left Home button (MItem keeps a 
 
 typedef struct { TColor outline, body, shade, hi, eye, accent, light; } MascotPal;
 
-static const MascotPal MASCOT_PAL[6] = {
+static const MascotPal MASCOT_PAL[AVATAR_TOTAL] = {
     { 0x4A1408u, 0xE8562Au, 0xB8361Au, 0xFFB13Bu, 0x2A0E06u, 0xFF7A1Fu, 0xFFE066u }, /* fire flame */
     { 0x0B2747u, 0x2FA8FFu, 0x1A72C4u, 0xC8F2FFu, 0x0B1F33u, 0x2FA8FFu, 0x9BE7FFu }, /* water drop */
     { 0x1E2A0Eu, 0x7FA34Au, 0x5C7A2Eu, 0xC6E08Au, 0x16200Au, 0x4FBF3Au, 0xB8F07Au }, /* forest sprout */
     { 0x5A2A18u, 0xD97757u, 0xB85C3Du, 0xF4B89Cu, 0x1F1E1Du, 0xF2C14Eu, 0xFFE9A8u }, /* temple king */
     { 0x1A1C12u, 0x8A8F70u, 0x656A50u, 0xC8CCAEu, 0x1A1C12u, 0xB9B79Cu, 0xE8E6CFu }, /* guardian */
     { 0x121110u, 0x3D3A36u, 0x2A2825u, 0x6B6660u, 0xF0A27Eu, 0xC9A227u, 0xE8D27Au }, /* automaton */
+    { 0x4A3A1Eu, 0xD8C08Au, 0xB39A62u, 0xF4E6BEu, 0x2A2014u, 0x8C6A3Au, 0xB08850u }, /* novice (computer Easy) */
+    { 0x120A1Eu, 0x3B2A5Au, 0x2A1D42u, 0x6E58A0u, 0xFF4FD8u, 0xE8C25Au, 0xFF6FE0u }, /* obsidian warden (computer Hard) */
 };
 
 /* Headgear rows 0-5 per avatar (A/F accent, L/Y accent-light, H highlight). */
-static const char *const MASCOT_HEAD[6][6] = {
+static const char *const MASCOT_HEAD[AVATAR_TOTAL][6] = {
     { ".......Y........", "......YF...Y....", ".....YFF..YF....",
       "....YFFLFYFF....", "....FFLLLLFF....", "...FFLLLLLLFF..." },
     { "..........L.....", ".........LL.....", "........LAL.....",
@@ -75,6 +77,10 @@ static const char *const MASCOT_HEAD[6][6] = {
       "....AAHAAAA.....", "...AAAAAAAAA....", "...A.A.A.A.A...." },
     { ".......L........", "......LLL.......", ".......A........",
       ".......A........", ".....AAAAA......", "................" },
+    { "................", "................", "......AAAA......",
+      ".....AALLAA.....", "....AALAAAAA....", "...AAAAAAAAAA..." },
+    { "................", "...A.......A....", "...AA.....AA....",
+      "....AA.L.AA.....", ".....AALAA......", "....AAAAAAA....." },
 };
 
 /* Body rows 6-15, shared by all avatars (B body, S shade, H highlight, E eye). */
@@ -96,7 +102,7 @@ void tui_draw_mascot(int x, int y, int avatar, TColor bg, bool bob, bool flicker
  * bob shifts the art by one half cell (idle bob); flicker swaps the fire flame tips. */
 void tui_draw_mascot(int x, int y, int avatar, TColor bg, bool bob, bool flicker)
 {
-    int a = ((avatar % AVATAR_COUNT) + AVATAR_COUNT) % AVATAR_COUNT;
+    int a = avatar < 0 ? 0 : (avatar >= AVATAR_TOTAL ? AVATAR_TOTAL - 1 : avatar);  /* no wrap: 6/7 are champions */
     const MascotPal *p = &MASCOT_PAL[a];
     TColor acc = p->accent, lit = p->light, px[16][16], full[16][16];
     if (flicker && a == 0) { acc = p->light; lit = p->accent; }
@@ -1001,6 +1007,14 @@ static void draw_setup(int cols, int rows)
     put_centred(px, 62, py + 7, tr(bi == 0 ? S_BOARD_3_DESC : (bi == 1 ? S_BOARD_5_DESC : S_BOARD_10_DESC)),
                 TC_DIM, TC_PANEL, 0);
     put_centred(px, 62, py + 13, tr(S_RULE_BLOCKED_DESC), TC_DIM, TC_PANEL, 0);
+    if (pve) {  /* the champion you will face on the chosen difficulty, live */
+        int d = (int)g_tui.settings.last_diff;
+        char line[128], shown[64];
+        snprintf(line, sizeof line, "%s \xC2\xB7 %s", tr((StrId)(S_CHAMP_EASY + d)),
+                 tr((StrId)(S_CHAMP_EASY_TITLE + d)));
+        clip_cells(shown, sizeof shown, line, 58);
+        put_centred(px, 62, py + 10, shown, TC_TEXT, TC_PANEL, 0);
+    }
     draw_items();
     draw_hint(cols, rows, tr(S_HINT_MENU));
 }
@@ -1027,8 +1041,12 @@ static void draw_profile(int cols, int rows)
     draw_card(x0, 4, TC_FIRE, tr(S_PLAYER_1), tr(S_PLAYS_FIRE), s->profile[0].avatar, s->profile[0].name,
               name_blank(s->profile[0].name));
     if (pve) {
-        draw_card(x1, 4, TC_WATER, tr(S_COMPUTER), tr(S_PLAYS_WATER), 5, tr(S_COMPUTER), false);
-        put_centred(x1, CARD_W, 17, tr(S_COMPUTER), TC_TEXT, TC_PANEL, 0);
+        int d = (int)s->last_diff, ca = game_champion_avatar(s->last_diff);
+        draw_card(x1, 4, TC_WATER, tr(S_OPPONENT), tr(S_PLAYS_WATER), ca, tr((StrId)(S_CHAMP_EASY + d)), false);
+        char title[64];
+        clip_cells(title, sizeof title, tr((StrId)(S_CHAMP_EASY_TITLE + d)), CARD_W - 4);
+        put_centred(x1, CARD_W, 17, tr((StrId)(S_CHAMP_EASY + d)), TC_TEXT, TC_PANEL, TATTR_BOLD);
+        put_centred(x1, CARD_W, 18, title, TC_DIM, TC_PANEL, 0);
     } else {
         draw_card(x1, 4, TC_WATER, tr(S_PLAYER_2), tr(S_PLAYS_WATER), s->profile[1].avatar, s->profile[1].name,
                   name_blank(s->profile[1].name));
