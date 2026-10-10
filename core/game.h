@@ -59,7 +59,8 @@ Cell game_cell_of(int player);
 bool game_is_ai_turn(const Game *g);   /* PvE and turn == ai_player and playing */
 bool game_last_move(const Game *g, Pos *out); /* false if no moves */
 
-/* Current player plays (r,c). Returns false if illegal / not playing / undo pending.
+/* Current player plays (r,c). Returns false if illegal / not playing / undo pending /
+ * AFK prompt or timeout active.
  * Detects win (END_LINE) and draw (board full, END_DRAW), else switches turn. */
 bool game_play(Game *g, int r, int c);
 
