@@ -526,31 +526,62 @@ bool ui_textbox_editing(void) { return edit_active; }
 
 /* ---- decorative ---- */
 
+#define PANEL_HEAD_H 48   /* title strip height (inside the 4 px outer frame) */
+#define PANEL_BAND_H 6    /* brick band on plain panels (top edge only) */
+
+/* Brick joints for a strip at (x, y, w, h): courses of `course` px, alternating joint offsets. */
+static void draw_brick_strip(float x, float y, float w, float h, float course, float brick)
+{
+    Color joint = with_a(COL_STONE_900, 120);
+    Color lip = with_a(COL_STONE_600, 70);
+    int rows = (int)ceilf(h / course);
+    for (int k = 0; k < rows; k++) {
+        float ry = y + k * course;
+        float rh = fminf(course, y + h - ry);
+        if (k > 0) fillr(x, ry, w, 1, joint);
+        fillr(x, ry + 1, w, 1, lip);
+        float off = (k & 1) ? brick * 0.5f : 0.0f;
+        for (float bx = x + off; bx < x + w; bx += brick)
+            if (bx > x) fillr(bx, ry, 1, rh, joint);
+    }
+}
+
 static void draw_panel_at(Rectangle r, const char *title)
 {
+    bool has_title = title && *title;
     fillr(r.x, r.y, r.width, r.height, COL_STONE_800);
 
-    /* faint brick seams in the top band */
-    Color seam = with_a(COL_STONE_900, 90);
-    for (int row = 0; row < 3; row++) {
-        float y = r.y + 8 + row * 24;
-        if (y > r.y + 80) break;
-        fillr(r.x + 8, y, r.width - 16, 1, seam);
-        float off = (row & 1) ? 0 : 40;
-        for (float x = r.x + 8 + off; x < r.x + r.width - 8; x += 80)
-            fillr(x, y, 1, 24, seam);
+    if (has_title) {
+        /* title strip: the only place the brick texture appears */
+        float hy = r.y + 4, hh = PANEL_HEAD_H;
+        fillr(r.x + 4, hy, r.width - 8, hh, with_a(COL_STONE_900, 150));
+        draw_brick_strip(r.x + 4, hy, r.width - 8, hh, 16, 64);
+    } else {
+        /* plain panel: a thin band of brick joints at the very top, content stays clean */
+        draw_brick_strip(r.x + 6, r.y + 6, r.width - 12, PANEL_BAND_H, PANEL_BAND_H, 48);
     }
 
     DrawRectangleLinesEx(r, 4, fc(COL_STONE_900));
     DrawRectangleLinesEx((Rectangle){ r.x + 4, r.y + 4, r.width - 8, r.height - 8 }, 2, fc(COL_STONE_600));
     fillr(r.x + 6, r.y + 6, r.width - 12, 2, with_a(COL_STONE_400, 70));
 
-    if (title && *title) {
-        fillr(r.x + 4, r.y + 4, r.width - 8, 48, with_a(COL_STONE_900, 150));
-        fillr(r.x + 4, r.y + 52, r.width - 8, 2, COL_GOLD_DARK);
-        Vector2 m = text_measure(title, FS_H2);
-        text_draw_outline(title, r.x + (r.width - m.x) / 2, r.y + 4 + (48 - m.y) / 2, FS_H2,
-                          fc(COL_GOLD), fc(COL_STONE_900), 2);
+    if (has_title) {
+        /* gold underline with a dark shadow line under it */
+        float uy = r.y + 4 + PANEL_HEAD_H + 2;
+        fillr(r.x + 4, uy, r.width - 8, 2, COL_GOLD);
+        fillr(r.x + 4, uy + 2, r.width - 8, 2, COL_GOLD_DARK);
+
+        /* title: gold with dark outline, centred; shrinks (never below FS_SMALL) to fit the width */
+        float size = FS_H2;
+        float maxw = r.width - 2 * 56;      /* clear of the corner rivets */
+        Vector2 m = text_measure(title, size);
+        while (size > FS_SMALL && m.x > maxw) {
+            size -= 2;
+            m = text_measure(title, size);
+        }
+        int px = size >= 32 ? 2 : 1;
+        text_draw_outline(title, r.x + (r.width - m.x) / 2, r.y + 4 + (PANEL_HEAD_H - m.y) / 2, size,
+                          fc(COL_GOLD), fc(COL_STONE_900), px);
     }
 
     /* gold corner rivets */

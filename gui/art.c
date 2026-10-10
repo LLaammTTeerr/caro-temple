@@ -632,10 +632,14 @@ static void compose_mascot(MascotId m, int variant, Color out[256])
     }
 }
 
+/* Visible-content box (art px, inclusive) of each mascot, union over all its frames. */
+static int s_bx0[MASCOT_COUNT], s_by0[MASCOT_COUNT], s_bx1[MASCOT_COUNT], s_by1[MASCOT_COUNT];
+
 static void bake_mascots(void)
 {
     Color buf[256];
     for (int m = 0; m < MASCOT_COUNT; m++) {
+        s_bx0[m] = 16; s_by0[m] = 16; s_bx1[m] = -1; s_by1[m] = -1;
         for (int v = 0; v < 3; v++) {
             /* only fire and water have a flicker/shimmer frame; others reuse the normal texture */
             if (v == 2 && m != MASCOT_FIRE && m != MASCOT_WATER) {
@@ -644,6 +648,14 @@ static void bake_mascots(void)
             }
             compose_mascot((MascotId)m, v, buf);
             s_mascot[m][v] = tex_from(buf, 16, 16);
+            for (int y = 0; y < 16; y++)
+                for (int x = 0; x < 16; x++)
+                    if (buf[y * 16 + x].a > 0) {
+                        if (x < s_bx0[m]) s_bx0[m] = x;
+                        if (x > s_bx1[m]) s_bx1[m] = x;
+                        if (y < s_by0[m]) s_by0[m] = y;
+                        if (y > s_by1[m]) s_by1[m] = y;
+                    }
         }
     }
 }
@@ -951,6 +963,21 @@ void art_draw_background(ArtBg bg, float t)
 }
 
 /* ---------- public: mascots ---------- */
+/* Integer-scales the mascot's visible content box into dst (nearest neighbour, centred).
+ * Falls back to a fractional scale when dst is smaller than 1x. Returns the top-left of the
+ * 16x16 sprite and the art-px scale; the content box lands inside dst. */
+static void mascot_fit(MascotId m, Rectangle dst, float *ox, float *oy, float *sc)
+{
+    float bw = (float)(s_bx1[m] - s_bx0[m] + 1), bh = (float)(s_by1[m] - s_by0[m] + 1);
+    float fit = fminf(dst.width / bw, dst.height / bh);
+    float s = floorf(fit);
+    if (s < 1.0f) s = fit > 0.0f ? fit : 1.0f;
+    float cw = bw * s, ch = bh * s;
+    *ox = dst.x + floorf((dst.width - cw) * 0.5f) - (float)s_bx0[m] * s;
+    *oy = dst.y + floorf((dst.height - ch) * 0.5f) - (float)s_by0[m] * s;
+    *sc = s;
+}
+
 void art_draw_mascot(MascotId m, Rectangle dst, float t, bool animate)
 {
     if (!s_inited || m < 0 || m >= MASCOT_COUNT) return;
@@ -966,16 +993,13 @@ void art_draw_mascot(MascotId m, Rectangle dst, float t, bool animate)
         if (m == MASCOT_WATER && fmodf(t, 2.0f) < 0.2f) var = 2;         /* droplet shimmer */
     }
 
-    float side = fminf(dst.width, dst.height);
-    float sc = floorf(side / 16.0f);
-    if (sc < 1.0f) sc = side / 16.0f;
-    float w = 16.0f * sc;
-    float x = dst.x + floorf((dst.width - w) * 0.5f);
-    float y = dst.y + floorf((dst.height - w) * 0.5f);
+    float x, y, sc;
+    mascot_fit(m, dst, &x, &y, &sc);
     if (animate && !calm) {
-        int up = ((int)floorf(t * 2.0f)) & 1;           /* 1 px bob, 1 Hz */
+        int up = ((int)floorf(t * 2.0f)) & 1;           /* 1 art px bob, 1 Hz */
         y -= (float)up * sc;
     }
+    float w = 16.0f * sc;
     DrawTexturePro(s_mascot[m][var], (Rectangle){ 0, 0, 16, 16 }, (Rectangle){ x, y, w, w },
                    (Vector2){ 0, 0 }, 0.0f, WHITE);
 }
@@ -994,7 +1018,7 @@ void art_draw_avatar(int avatar, Rectangle d, float t)
     DrawRectangle((int)body.x, (int)(body.y + body.height - 4), (int)body.width, 4, COL_STONE_800);
     DrawRectangle((int)(body.x + body.width - 4), (int)body.y, 4, (int)body.height, COL_STONE_800);
 
-    float ix = d.x + 12, iy = d.y + 12, iw = d.width - 24, ih = d.height - 24;
+    float ix = d.x + 10, iy = d.y + 10, iw = d.width - 20, ih = d.height - 20;
     Rectangle inner = { ix, iy, iw, ih };
     DrawRectangleRec(inner, COL_STONE_900);
     Rectangle back = { ix + 4, iy + 4, iw - 8, ih - 8 };
@@ -1020,8 +1044,18 @@ void art_draw_avatar(int avatar, Rectangle d, float t)
         DrawRectangle((int)rv[i][0] + 2, (int)rv[i][1] + 2, 2, 2, hex(0xFFEBA6));
     }
 
-    Rectangle mr = { back.x + 12, back.y + 12, back.width - 24, back.height - 24 };
-    art_draw_mascot((MascotId)m, mr, t, true);
+    if (!s_inited) return;
+    /* creature: ~90% of the recess height (integer scale), standing low with feet near the bottom */
+    float bh = back.height * 0.9f;
+    Rectangle box = { back.x, back.y + back.height - bh - 2.0f, back.width, bh };
+    float ox, oy, sc;
+    mascot_fit((MascotId)m, box, &ox, &oy, &sc);
+    float feet = oy + (float)(s_by1[m] + 1) * sc;          /* bottom edge of the content (static) */
+    float cx = ox + ((float)(s_bx0[m] + s_bx1[m] + 1) * 0.5f) * sc;
+    float rw = (float)(s_bx1[m] - s_bx0[m] + 1) * sc * 0.42f;
+    DrawEllipse((int)roundf(cx), (int)roundf(feet - sc * 0.5f), rw, sc * 0.9f, ca(COL_STONE_900, 150));
+
+    art_draw_mascot((MascotId)m, box, t, true);
 }
 
 /* ---------- public: title ---------- */
