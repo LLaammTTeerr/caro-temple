@@ -65,8 +65,14 @@ int main(int argc, char **argv)
     i18n_set_lang(g_app.settings.lang);
 
     SetTraceLogLevel(LOG_WARNING);
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
+    /* No MSAA: the pixel art is rendered through a point-filtered render texture anyway, and
+     * some GL drivers (e.g. virtualised macOS) offer no multisampled pixel format at all. */
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     InitWindow(VIRTUAL_W, VIRTUAL_H, "Caro Temple");
+    if (!IsWindowReady()) {
+        fprintf(stderr, "caro: could not create a window / OpenGL 3.3 context.\n");
+        return 1;
+    }
     SetWindowMinSize(640, 360);
     SetExitKey(KEY_NULL);
     SetTargetFPS(60);

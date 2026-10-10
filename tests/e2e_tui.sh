@@ -11,9 +11,14 @@ pause() { sleep "$(awk "BEGIN{print $1*$S}")"; }
 screen() { t capture-pane -p -t e2e; }
 expect() { # expect <regex> <what>
   for _ in 1 2 3 4 5 6; do screen | grep -qE "$1" && { echo "ok: $2"; return 0; }; pause 0.5; done
-  echo "E2E TUI FAIL: $2 (wanted /$1/)"; screen; exit 1
+  echo "E2E TUI FAIL: $2 (wanted /$1/)"; screen; echo "--- key trace ---"; cat "$WORK/trace.txt" 2>/dev/null; exit 1
 }
-keys() { for k in "$@"; do t send-keys -t e2e "$k"; pause 0.15; done; }
+keys() {
+  for k in "$@"; do
+    t send-keys -t e2e "$k"; pause 0.15
+    { echo "=== after key $k"; screen | grep -E "▶|◀|Champion|New Game|turn|moves" | head -4; } >> "$WORK/trace.txt"
+  done
+}
 cleanup() { t kill-server 2>/dev/null || true; }
 trap cleanup EXIT
 cd "$WORK"
