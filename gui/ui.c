@@ -168,7 +168,7 @@ void ui_frame_end(void)
     int ns = last_scope < 0 ? cur_scope : last_scope;
     int n = cnt[ns];
     if (n <= 0) {
-        focus[ns] = 0;
+        /* no widgets this frame (e.g. a hidden popup): keep the remembered focus */
     } else {
         if (focus[ns] < 0) focus[ns] = 0;
         if (focus[ns] >= n) focus[ns] = n - 1;

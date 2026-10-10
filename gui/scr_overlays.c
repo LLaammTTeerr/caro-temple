@@ -346,7 +346,7 @@ static void draw_peek_banner(const Game *g)
         msg = buf;
         col = side_color(w);
     }
-    DrawRectangleRec(b, Fade(COL_STONE_900, 0.92f));
+    DrawRectangleRec(b, COL_STONE_900);
     DrawRectangleLinesEx(b, 2, COL_GOLD);
     text_draw_aligned(msg, b.x + SP_2, b.y + (b.height - FS_BODY) / 2, FS_BODY, col, 0);
     text_draw_aligned(pick("Esc: results", "Esc: kết quả"), b.x + b.width - SP_2,
