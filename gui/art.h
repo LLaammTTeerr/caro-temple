@@ -21,7 +21,9 @@ typedef enum {
     MASCOT_LEAF,       /* forest: sprout (avatar 2) */
     MASCOT_CROWN,      /* gold temple king: crown (avatar 3) */
     MASCOT_STONE,      /* stone guardian: helmet (avatar 4) */
-    MASCOT_ROBOT,      /* temple automaton / computer: antenna (avatar 5, used for the AI) */
+    MASCOT_ROBOT,      /* temple automaton: antenna (avatar 5; also the Medium computer champion) */
+    MASCOT_NOVICE,     /* computer champion, Easy: hooded apprentice (avatar 6, not selectable) */
+    MASCOT_WARDEN,     /* computer champion, Hard: Obsidian Warden, horns + gem (avatar 7, not selectable) */
     MASCOT_COUNT
 } MascotId;
 
@@ -35,7 +37,7 @@ ArtBg art_board_bg(int board_n);              /* 3 -> BG_BOARD3, 5 -> BG_BOARD5,
 
 /* Draw mascot scaled into dst (nearest-neighbour), blinking occasionally, with optional idle bob. */
 void art_draw_mascot(MascotId m, Rectangle dst, float t, bool animate);
-void art_draw_avatar(int avatar, Rectangle dst, float t);   /* framed portrait: stone frame + mascot */
+void art_draw_avatar(int avatar, Rectangle dst, float t);   /* framed portrait: stone frame + mascot; avatar 0..AVATAR_TOTAL-1 == MascotId */
 
 /* "CARO TEMPLE" title: gold carved letters with dark outline + soft glow, centered at (cx, y). */
 void art_draw_title(float cx, float y, float scale, float t);

@@ -483,6 +483,12 @@ int main(void)
     test_surrender();
     test_ai_turn();
 
+    /* computer champions per difficulty */
+    CHECK(game_champion_avatar(DIFF_EASY) == 6);
+    CHECK(game_champion_avatar(DIFF_MEDIUM) == 5);
+    CHECK(game_champion_avatar(DIFF_HARD) == 7);
+    CHECK(game_champion_avatar(DIFF_HARD) < AVATAR_TOTAL);
+
     if (failures) {
         fprintf(stderr, "test_game: %d check(s) failed\n", failures);
         return 1;

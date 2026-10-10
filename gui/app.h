@@ -31,7 +31,7 @@ extern App g_app;
 void app_toast(const char *msg);       /* show a 2.5 s toast at the bottom of the screen */
 void app_save_settings(void);          /* persist + re-apply language / audio volumes */
 /* Create g_app.game from settings (last_mode/last_board/last_diff/block_rule/profile[]),
- * PvE: players[1] = { tr(S_COMPUTER), avatar 5 }. Sets has_game, goes to SCENE_GAME. */
+ * PvE: players[1] = the difficulty's champion (name tr(S_CHAMP_EASY + diff), game_champion_avatar). Sets has_game, goes to SCENE_GAME. */
 void app_start_new_game(void);
 /* Load slot into g_app.game; on success goes to SCENE_GAME, else toast S_LOAD_FAILED. */
 bool app_load_slot(int slot);

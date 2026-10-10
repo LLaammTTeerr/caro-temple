@@ -55,6 +55,22 @@ HEAD = {
         "...AAAAAAAAA....",
         "...A.A.A.A.A....",
     ],
+    "hood": [
+        "................",
+        "................",
+        "......AAAA......",
+        ".....AALLAA.....",
+        "....AALAAAAA....",
+        "...AAAAAAAAAA...",
+    ],
+    "horns": [
+        "................",
+        "...A.......A....",
+        "...AA.....AA....",
+        "....AA.L.AA.....",
+        ".....AALAA......",
+        "....AAAAAAA.....",
+    ],
     "antenna": [
         ".......L........",
         "......LLL.......",
@@ -72,6 +88,8 @@ PAL = {
     "fire":       ("#4A1408", "#E8562A", "#B8361A", "#FFB13B", "#2A0E06", "#FF7A1F", "#FFE066"),
     "water":      ("#0B2747", "#2FA8FF", "#1A72C4", "#C8F2FF", "#0B1F33", "#2FA8FF", "#9BE7FF"),
     "moss":       ("#1E2A0E", "#7FA34A", "#5C7A2E", "#C6E08A", "#16200A", "#4FBF3A", "#B8F07A"),
+    "sand":       ("#4A3A1E", "#D8C08A", "#B39A62", "#F4E6BE", "#2A2014", "#8C6A3A", "#B08850"),
+    "obsidian":   ("#120A1E", "#3B2A5A", "#2A1D42", "#6E58A0", "#FF4FD8", "#E8C25A", "#FF6FE0"),
     "stone":      ("#1A1C12", "#8A8F70", "#656A50", "#C8CCAE", "#1A1C12", "#B9B79C", "#E8E6CF"),
 }
 
@@ -123,17 +141,8 @@ def sheet(items, title, path, scale=12):
 if __name__ == "__main__":
     outdir = sys.argv[1]
     sheet([
-        ("A1 Fire twin", build("flame", PAL["fire"])),
-        ("A2 Water twin", build("drop", PAL["water"])),
-        ("B1 Terracotta+flame", build("flame", PAL["terracotta"])),
-        ("B2 Charcoal+drop", build("drop", PAL["charcoal"])),
-    ], "Mascot leads: A = elemental bodies (PDF twins)  B = brief palette + elemental headgear", f"{outdir}/mascot_leads.png")
-    sheet([
-        ("0 Fire", build("flame", PAL["fire"])),
-        ("1 Water", build("drop", PAL["water"])),
-        ("2 Forest", build("sprout", PAL["moss"])),
-        ("3 Temple King", build("crown", PAL["terracotta"])),
-        ("4 Guardian", build("helmet", PAL["stone"])),
-        ("5 Automaton (AI)", build("antenna", PAL["charcoal"])),
-    ], "Avatar set (option A)", f"{outdir}/mascot_avatars.png", scale=10)
+        ("Easy: Novice", build("hood", PAL["sand"])),
+        ("Medium: Automaton", build("antenna", PAL["charcoal"])),
+        ("Hard: Obsidian Warden", build("horns", PAL["obsidian"])),
+    ], "Computer champions by difficulty", f"{outdir}/champions.png", scale=12)
     print("ok")

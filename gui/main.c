@@ -29,7 +29,10 @@ static void demo_game(int board_n, bool pvp, bool finished)
     s->last_board = board_n;
     s->last_mode = pvp ? MODE_PVP : MODE_PVE;
     PlayerInfo p[2] = { s->profile[0], s->profile[1] };
-    if (!pvp) { snprintf(p[1].name, sizeof p[1].name, "%s", tr(S_COMPUTER)); p[1].avatar = 5; }
+    if (!pvp) {
+        snprintf(p[1].name, sizeof p[1].name, "%s", tr((StrId)(S_CHAMP_EASY + s->last_diff)));
+        p[1].avatar = game_champion_avatar(s->last_diff);
+    }
     game_new(&g_app.game, s->last_mode, s->last_diff, board_n, false, p);
     g_app.has_game = true;
     int need = board_n == 3 ? 3 : 5;

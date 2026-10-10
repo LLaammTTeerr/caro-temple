@@ -11,7 +11,8 @@
 #define GAME_CLOCK_SECONDS 600.0     /* 10 minutes per player per match */
 #define GAME_MAX_MOVES (CARO_MAX_N * CARO_MAX_N)
 #define PLAYER_NAME_MAX 24           /* bytes incl. NUL, UTF-8 */
-#define AVATAR_COUNT 6
+#define AVATAR_COUNT 6      /* avatars a player can choose: 0..5 */
+#define AVATAR_TOTAL 8      /* plus computer-only champions: 6 = Novice, 7 = Obsidian Warden */
 
 /* AFK thresholds (seconds). Defaults 120 / 30. Frontends may override from env vars
  * CARO_AFK_IDLE / CARO_AFK_GRACE for testing. Defined in game.c. */
@@ -25,7 +26,7 @@ typedef enum { AFK_NONE = 0, AFK_PROMPT, AFK_TIMEOUT } AfkState;
 
 typedef struct {
     char name[PLAYER_NAME_MAX];
-    int avatar; /* 0..AVATAR_COUNT-1 */
+    int avatar; /* 0..AVATAR_COUNT-1 for people; the computer uses game_champion_avatar() */
 } PlayerInfo;
 
 typedef struct {
@@ -53,6 +54,11 @@ typedef struct {
 /* Start a new match. players[] copied. start_time = time(NULL). Clocks = GAME_CLOCK_SECONDS. */
 void game_new(Game *g, GameMode mode, Difficulty diff, int board_n, bool block_rule,
               const PlayerInfo players[2]);
+
+/* Computer opponent ("champion") per difficulty, vs Computer mode:
+ *   Easy -> 6 Novice, Medium -> 5 Automaton, Hard -> 7 Obsidian Warden.
+ * Its display name is tr(S_CHAMP_EASY + diff), its title tr(S_CHAMP_EASY_TITLE + diff). */
+int game_champion_avatar(Difficulty d);
 
 /* Cell symbol for player index: 0 -> CELL_X, 1 -> CELL_O. */
 Cell game_cell_of(int player);

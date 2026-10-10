@@ -470,7 +470,7 @@ static bool game_check(Game *g)
     if (g->ai_player != (g->mode == MODE_PVE ? 1 : -1)) return false;
     for (i = 0; i < 2; i++) {
         if (!name_ok(g->players[i].name)) return false;
-        if (g->players[i].avatar < 0 || g->players[i].avatar >= AVATAR_COUNT) return false;
+        if (g->players[i].avatar < 0 || g->players[i].avatar >= AVATAR_TOTAL) return false;
     }
     if (cnt < 0 || cnt > GAME_MAX_MOVES) return false;
     for (i = 0; i < 2; i++) {
@@ -606,7 +606,7 @@ static bool load_game_file(const char *path, Game *out, int64_t *saved_at)
             seen |= K_P2NAME;
         } else if (strcmp(key, "p1avatar") == 0 || strcmp(key, "p2avatar") == 0) {
             int idx = key[1] == '1' ? 0 : 1;
-            if (!parse_long(val, &lv) || lv < 0 || lv >= AVATAR_COUNT) goto done;
+            if (!parse_long(val, &lv) || lv < 0 || lv >= AVATAR_TOTAL) goto done;
             g.players[idx].avatar = (int)lv;
             seen |= idx == 0 ? K_P1AV : K_P2AV;
         } else if (strcmp(key, "ai") == 0) {

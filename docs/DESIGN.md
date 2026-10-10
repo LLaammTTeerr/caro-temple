@@ -70,7 +70,7 @@ Body (rows 6-15; `.` transparent, B body, S shade, H highlight, E eye):
 ```
 Headgear (rows 0-5; A accent, L/Y accent-light, F accent, H highlight):
 ```
-flame (avatar 0)   drop (avatar 1)    sprout (2)        crown (3)         helmet (4)        antenna (5, AI)
+flame (avatar 0)   drop (avatar 1)    sprout (2)        crown (3)         helmet (4)        antenna (5)
 .......Y........   ..........L.....   ................  ................  ................  .......L........
 ......YF...Y....   .........LL.....   .........AA.....  ....A..A..A.....  .......A........  ......LLL.......
 .....YFF..YF....   ........LAL.....   ....AA..AAA.....  ....AA.A.AA.....  .....AAAAA......  .......A........
@@ -88,7 +88,26 @@ Palettes (outline, body, shade, highlight, eye, accent, accent-light):
 | 2 Forest (sprout) | #1E2A0E #7FA34A #5C7A2E #C6E08A #16200A #4FBF3A #B8F07A |
 | 3 Temple King (crown) | #5A2A18 #D97757 #B85C3D #F4B89C #1F1E1D #F2C14E #FFE9A8 |
 | 4 Guardian (helmet) | #1A1C12 #8A8F70 #656A50 #C8CCAE #1A1C12 #B9B79C #E8E6CF |
-| 5 Automaton / AI (antenna) | #121110 #3D3A36 #2A2825 #6B6660 #F0A27E #C9A227 #E8D27A |
+| 5 Automaton (antenna) | #121110 #3D3A36 #2A2825 #6B6660 #F0A27E #C9A227 #E8D27A |
+| 6 Novice (hood), computer Easy | #4A3A1E #D8C08A #B39A62 #F4E6BE #2A2014 #8C6A3A #B08850 |
+| 7 Obsidian Warden (horns), computer Hard | #120A1E #3B2A5A #2A1D42 #6E58A0 #FF4FD8 #E8C25A #FF6FE0 |
+
+### Computer champions (vs Computer)
+Each difficulty has its own opponent; players cannot pick these avatars (6, 7):
+Easy → **Novice** (avatar 6), Medium → **Automaton** (avatar 5), Hard → **Obsidian Warden** (avatar 7).
+Name `tr(S_CHAMP_EASY + diff)`, title `tr(S_CHAMP_EASY_TITLE + diff)`, avatar `game_champion_avatar(diff)`.
+Headgear grids (rows 0-5) for the two new champions:
+```
+hood (6)           horns (7)
+................   ................
+................   ...A.......A....
+......AAAA......   ...AA.....AA....
+.....AALLAA.....   ....AA.L.AA.....
+....AALAAAAA....   .....AALAA......
+...AAAAAAAAAA...   ....AAAAAAA.....
+```
+The Warden's eyes glow (magenta, subtle pulse); Novice blinks like the others.
+Reference render: `docs/mockups/champions.png`.
 
 Animation: blink every 3–5 s for 0.12 s (eye top pixel → body colour, bottom → shade); idle bob of 1 art-pixel
 at ~1 Hz; fire twin's flame tips flicker between accent and accent-light every ~0.15 s; water twin's droplet

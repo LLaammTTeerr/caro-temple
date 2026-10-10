@@ -58,6 +58,15 @@ bool game_is_ai_turn(const Game *g)
     return g->mode == MODE_PVE && g->turn == g->ai_player && g->status == GS_PLAYING;
 }
 
+int game_champion_avatar(Difficulty d)
+{
+    switch (d) {
+    case DIFF_EASY: return 6;
+    case DIFF_HARD: return 7;
+    default: return 5;
+    }
+}
+
 bool game_last_move(const Game *g, Pos *out)
 {
     if (g->move_count <= 0) return false;

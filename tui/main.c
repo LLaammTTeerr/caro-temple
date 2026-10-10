@@ -37,8 +37,8 @@ void tui_start_new_game(void)
     p[0] = s->profile[0];
     if (s->last_mode == MODE_PVE) {
         memset(&p[1], 0, sizeof p[1]);
-        snprintf(p[1].name, sizeof p[1].name, "%s", tr(S_COMPUTER));
-        p[1].avatar = 5;
+        snprintf(p[1].name, sizeof p[1].name, "%s", tr((StrId)(S_CHAMP_EASY + s->last_diff)));
+        p[1].avatar = game_champion_avatar(s->last_diff);
     } else {
         p[1] = s->profile[1];
     }
