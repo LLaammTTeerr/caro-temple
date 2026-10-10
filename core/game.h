@@ -63,7 +63,10 @@ bool game_last_move(const Game *g, Pos *out); /* false if no moves */
  * Detects win (END_LINE) and draw (board full, END_DRAW), else switches turn. */
 bool game_play(Game *g, int r, int c);
 
-/* Advance time by dt seconds. If clocks_running and status PLAYING and no undo pending,
+/* Note: game_play resets idle (and afk prompt state is untouched) only for HUMAN moves;
+ * AI moves (game_is_ai_turn() true before the call) do not reset idle.
+ *
+ * Advance time by dt seconds. If clocks_running and status PLAYING and no undo pending,
  * the current player's clock decreases; at 0 -> END_TIMEOUT, opponent wins.
  * AFK tracking runs whenever status PLAYING (even when clocks paused):
  * idle += dt; idle >= game_afk_idle_s -> AFK_PROMPT with afk_left = game_afk_grace_s;
