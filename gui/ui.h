@@ -42,10 +42,10 @@ bool ui_choice(Rectangle r, const char *label, const char *const *options, int c
 /* Single-line UTF-8 text box. Focus + confirm (or click) enters editing; typing edits;
  * Enter/Esc/click outside leaves editing. Returns true while editing. max_bytes incl NUL. */
 bool ui_textbox(Rectangle r, char *buf, int max_bytes, const char *placeholder);
-bool ui_textbox_editing(void);
+bool ui_textbox_editing(void);            /* any textbox currently editing (scenes ignore ACT_BACK then) */
 /* Standard Home icon button (top-left, 56x56 at 24,12) with a pixel house glyph and
  * tooltip tr(S_HOME). Returns true when activated. Every screen except Home shows it (PRD). */
-bool ui_home_button(void);            /* any textbox currently editing (scenes ignore ACT_BACK then) */
+bool ui_home_button(void);
 
 /* Decorative */
 void ui_panel(Rectangle r);               /* carved stone panel: dark fill, brick-ish border, inner bevel */
