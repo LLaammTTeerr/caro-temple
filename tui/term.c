@@ -244,6 +244,10 @@ static void on_winch(int sig)
 }
 
 /* Enter raw mode (ISIG kept so Ctrl+C raises SIGINT) and install handlers. */
+#ifndef ENABLE_VIRTUAL_TERMINAL_INPUT
+#define ENABLE_VIRTUAL_TERMINAL_INPUT 0x0200
+#endif
+
 static bool plat_open(void)
 {
     struct termios raw;
@@ -367,7 +371,11 @@ static bool plat_open(void)
 
     in_mode = (g_orig_in_mode | ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS
                | ENABLE_PROCESSED_INPUT)
-              & ~(DWORD)(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_QUICK_EDIT_MODE);
+              & ~(DWORD)(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_QUICK_EDIT_MODE
+                         | ENABLE_VIRTUAL_TERMINAL_INPUT);
+    /* VT input must be off: when a parent (ConPTY, Windows Terminal) leaves it on, arrow keys
+     * arrive as raw "ESC [ B" characters instead of VK_DOWN records, and the ESC byte would be
+     * read as Back. With it off the console delivers proper virtual-key records. */
     out_mode = g_orig_out_mode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
 
     if (!SetConsoleMode(g_hout, out_mode)) return false;

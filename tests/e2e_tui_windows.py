@@ -14,6 +14,7 @@ import time
 
 from winpty import PtyProcess  # pip install pywinpty
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # screen dumps contain box glyphs
 EXE = sys.argv[1]
 SCALE = float(os.environ.get("XINJ_SCALE", "1"))
 ANSI = re.compile(r"\x1b\[[0-9;?<>]*[ -/]*[@-~]|\x1b[()][0-9A-Za-z]|\x1b[=>78]|\x1b\][^\x07]*\x07")
