@@ -83,27 +83,38 @@ static void update_btn(Btn *b, bool down, bool rep, float dt)
     b->prev = down;
 }
 
+/* Keys pressed this frame according to raylib's press queue. A tap shorter than one frame
+ * (slow machine, or very quick finger) is pressed AND released before we sample IsKeyDown,
+ * so it would be lost; the queue still records it, and we count it as down for this frame. */
+#define TAP_KEYS 512
+static bool tapped[TAP_KEYS];
+
+static bool kd(int key)
+{
+    return IsKeyDown(key) || (key >= 0 && key < TAP_KEYS && tapped[key]);
+}
+
 /* Keyboard sources for one player slot (0 or 1). Esc and Home are shared by both players. */
 static bool key_state(ActionType a, int slot)
 {
-    if (a == ACT_BACK) return IsKeyDown(KEY_ESCAPE);
-    if (a == ACT_HOME) return IsKeyDown(KEY_HOME);
+    if (a == ACT_BACK) return kd(KEY_ESCAPE);
+    if (a == ACT_HOME) return kd(KEY_HOME);
     if (slot == 0) {
         switch (a) {
-        case ACT_UP: return IsKeyDown(KEY_W);
-        case ACT_DOWN: return IsKeyDown(KEY_S);
-        case ACT_LEFT: return IsKeyDown(KEY_A);
-        case ACT_RIGHT: return IsKeyDown(KEY_D);
-        case ACT_CONFIRM: return IsKeyDown(KEY_SPACE);
+        case ACT_UP: return kd(KEY_W);
+        case ACT_DOWN: return kd(KEY_S);
+        case ACT_LEFT: return kd(KEY_A);
+        case ACT_RIGHT: return kd(KEY_D);
+        case ACT_CONFIRM: return kd(KEY_SPACE);
         default: return false;
         }
     }
     switch (a) {
-    case ACT_UP: return IsKeyDown(KEY_UP);
-    case ACT_DOWN: return IsKeyDown(KEY_DOWN);
-    case ACT_LEFT: return IsKeyDown(KEY_LEFT);
-    case ACT_RIGHT: return IsKeyDown(KEY_RIGHT);
-    case ACT_CONFIRM: return IsKeyDown(KEY_ENTER) || IsKeyDown(KEY_KP_ENTER);
+    case ACT_UP: return kd(KEY_UP);
+    case ACT_DOWN: return kd(KEY_DOWN);
+    case ACT_LEFT: return kd(KEY_LEFT);
+    case ACT_RIGHT: return kd(KEY_RIGHT);
+    case ACT_CONFIRM: return kd(KEY_ENTER) || kd(KEY_KP_ENTER);
     default: return false;
     }
 }
@@ -177,7 +188,12 @@ static bool pad_held(int k, ActionType a)
 static bool sample_keyboard_activity(void)
 {
     bool act = false;
-    while (GetKeyPressed() != 0) act = true; /* drain queue; any key counts */
+    int k;
+    for (int i = 0; i < TAP_KEYS; i++) tapped[i] = false;
+    while ((k = GetKeyPressed()) != 0) {            /* drain queue; any key counts */
+        act = true;
+        if (k > 0 && k < TAP_KEYS) tapped[k] = true;
+    }
     for (unsigned i = 0; i < sizeof mapped_keys / sizeof mapped_keys[0]; i++)
         if (IsKeyReleased(mapped_keys[i])) act = true;
     return act;
@@ -235,7 +251,7 @@ void input_update(float dt)
             any = any || pad_held(k, (ActionType)a);
         update_btn(&btn[a][SLOT_ANY], any, rep, dt);
     }
-    update_btn(&bs_btn, IsKeyDown(KEY_BACKSPACE), true, dt);
+    update_btn(&bs_btn, kd(KEY_BACKSPACE), true, dt);
 
     char_n = 0;
     char_i = 0;
