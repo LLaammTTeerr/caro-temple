@@ -1,7 +1,15 @@
 /* scr_overlays.c - in-game popups: pause, undo request, surrender / leave confirms, AFK
  * prompt and game over. Driven by scr_game.c: overlay_update(dt) runs before its own input
  * and overlay_draw() runs last. Widgets are immediate-mode, so every button result is
- * collected during draw and applied once, after all widgets for the frame were drawn. */
+ * collected during draw and applied once, after all widgets for the frame were drawn.
+ *
+ * Input contract: overlay_update() returns true whenever it owns the frame (scr_game then
+ * skips board and HUD input). A key it acts on is swallowed with input_consume(), so the same
+ * press is not seen again by scr_game (Esc closing Pause must not reopen it).
+ *
+ * Popup geometry: each popup is sized from its content. A popup is OVL_HEAD (title band) +
+ * SP_2 + body + SP_3 tall. Body elements are laid out from the top, buttons are BTN_H tall
+ * with BTN_GAP between them, and the primary action sits on the right. */
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -20,6 +28,22 @@
 #define OVL_OVER_DELAY_S      0.8f
 #define OVL_TICK_SECONDS      10
 
+#define OVL_HEAD    64      /* title band of ui_popup (PANEL_HEAD) */
+#define BTN_H       56
+#define BTN_GAP     SP_2
+#define BTN_PAIR_W  240     /* width of a two-button row */
+
+/* Body heights, from the elements each popup draws. */
+#define C_PAUSE     (6 * BTN_H + 5 * BTN_GAP)
+#define C_UNDO      340
+#define C_SURRENDER 256
+#define C_LEAVE     160
+#define C_AFK       280
+#define C_OVER      396
+#define BANNER_W    640
+
+static float pop_h(float body) { return OVL_HEAD + SP_2 + body + SP_3; }
+
 /* Button results. Applied once per frame. */
 typedef enum {
     OA_NONE = 0,
@@ -37,24 +61,55 @@ typedef enum {
     OA_LEAVE_NO,
     OA_AFK_YES,
     OA_REMATCH,
-    OA_GAME_HOME
+    OA_GAME_HOME,
+    OA_PEEK
 } OvlAction;
 
 static OverlayId cur = OVL_NONE;
 static float appear = 0.0f;       /* 0..1 popup appear progress */
 static float over_wait = -1.0f;   /* >= 0 while the game-over delay runs */
 static int tick_last = -1;        /* last whole AFK second that played SFX_TICK */
+static bool peek = false;         /* game over: popup hidden, board visible under a banner */
+
+static bool reduced(void)
+{
+    return g_app.settings.reduced_motion;
+}
+
+/* Two-language literal, picked by the active language (no i18n keys exist for these hints). */
+static const char *pick(const char *en, const char *vi)
+{
+    return i18n_lang() == LANG_VI ? vi : en;
+}
+
+/* Focus index inside the popup, by call order of its buttons (see the draw_* functions). */
+static int default_focus(OverlayId id)
+{
+    switch (id) {
+    case OVL_SURRENDER_CONFIRM: return 0;  /* "No" is called first */
+    case OVL_UNDO_REQUEST: return 0;       /* "Decline" is called first: the safe choice */
+    case OVL_LEAVE_CONFIRM: return 1;      /* "Yes" (primary) is called second */
+    case OVL_GAME_OVER: return 2;          /* "Rematch" (primary) is called last */
+    default: return 0;
+    }
+}
+
+static void focus_default(void)
+{
+    ui_focus_scope(1);
+    ui_focus_reset();
+    ui_focus_set(default_focus(cur));
+    ui_focus_scope(0);
+}
 
 /* Switch popup without sound (used for back navigation). */
 static void set_overlay(OverlayId id)
 {
     cur = id;
     appear = 0.0f;
+    peek = false;
     tick_last = -1;
-    ui_focus_scope(1);
-    ui_focus_reset();
-    if (id == OVL_SURRENDER_CONFIRM) ui_focus_set(1); /* default to "No" */
-    ui_focus_scope(0);
+    focus_default();
 }
 
 void overlay_open(OverlayId id)
@@ -66,6 +121,7 @@ void overlay_open(OverlayId id)
 void overlay_close(void)
 {
     cur = OVL_NONE;
+    peek = false;
 }
 
 OverlayId overlay_current(void)
@@ -103,9 +159,15 @@ static bool menu_button(Rectangle r, const char *label, ButtonStyle st, bool ena
     return ui_button(r, label, st);
 }
 
-static bool reduced(void)
+/* Two buttons centred side by side at row y: `left` first, `right` (the primary) on the right. */
+static void pair_row(Rectangle c, float y, const char *left, ButtonStyle ls, OvlAction la,
+                     const char *right, ButtonStyle rs, OvlAction ra, OvlAction *out)
 {
-    return g_app.settings.reduced_motion;
+    float cx = c.x + c.width / 2;
+    Rectangle r1 = { cx - BTN_PAIR_W - SP_2 / 2, y, BTN_PAIR_W, BTN_H };
+    Rectangle r2 = { cx + SP_2 / 2, y, BTN_PAIR_W, BTN_H };
+    if (ui_button(r1, left, ls)) *out = la;
+    if (ui_button(r2, right, rs)) *out = ra;
 }
 
 /* ---------- popup bodies: each returns the button result for this frame ---------- */
@@ -114,8 +176,8 @@ static OvlAction draw_pause(Rectangle c, const Game *g)
 {
     OvlAction a = OA_NONE;
     bool playing = g->status == GS_PLAYING;
-    float bw = 400, bh = 56, step = 56 + SP_2;
-    Rectangle r = { c.x + (c.width - bw) / 2, c.y + SP_1, bw, bh };
+    float bw = 400, step = BTN_H + BTN_GAP;
+    Rectangle r = { c.x + (c.width - bw) / 2, c.y + SP_2, bw, BTN_H };
 
     if (ui_button(r, tr(S_RESUME), BTN_PRIMARY)) a = OA_RESUME;
     r.y += step;
@@ -137,19 +199,17 @@ static OvlAction draw_undo_request(Rectangle c, const Game *g)
     int req = g->undo_requester < 0 ? 0 : g->undo_requester;
     int ans = 1 - req;   /* the opponent must answer */
     float cx = c.x + c.width / 2;
+    float y = c.y + SP_2;
     char buf[256];
 
-    art_draw_avatar(g->players[ans].avatar, (Rectangle){ cx - 64, c.y, 128, 128 }, g_app.time);
-    text_draw_aligned(g->players[ans].name, cx, c.y + 136, FS_H2, side_color(ans), 1);
+    art_draw_avatar(g->players[ans].avatar, (Rectangle){ cx - 56, y, 112, 112 }, g_app.time);
+    text_draw_aligned(g->players[ans].name, cx, y + 120, FS_H2, side_color(ans), 1);
     snprintf(buf, sizeof buf, tr(S_UNDO_REQUEST_FMT), g->players[req].name);
-    text_draw_wrapped(buf, (Rectangle){ c.x + SP_3, c.y + 184, c.width - 2 * SP_3, 100 },
+    text_draw_wrapped(buf, (Rectangle){ c.x + SP_3, y + 172, c.width - 2 * SP_3, 96 },
                       FS_BODY, COL_TEXT, 1);
 
-    float bw = 240, y = c.y + 296;
-    Rectangle r1 = { cx - bw - SP_2 / 2, y, bw, 56 };
-    Rectangle r2 = { cx + SP_2 / 2, y, bw, 56 };
-    if (ui_button(r1, tr(S_ACCEPT), BTN_PRIMARY)) a = OA_UNDO_ACCEPT;
-    if (ui_button(r2, tr(S_DECLINE), BTN_NORMAL)) a = OA_UNDO_DECLINE;
+    pair_row(c, y + C_UNDO - BTN_H, tr(S_DECLINE), BTN_NORMAL, OA_UNDO_DECLINE,
+             tr(S_ACCEPT), BTN_PRIMARY, OA_UNDO_ACCEPT, &a);
     return a;
 }
 
@@ -158,33 +218,28 @@ static OvlAction draw_surrender(Rectangle c, const Game *g)
     OvlAction a = OA_NONE;
     int who = g->mode == MODE_PVP ? g->turn : 0;
     float cx = c.x + c.width / 2;
+    float y = c.y + SP_2;
     char buf[160];
 
-    art_draw_avatar(g->players[who].avatar, (Rectangle){ cx - 48, c.y, 96, 96 }, g_app.time);
+    art_draw_avatar(g->players[who].avatar, (Rectangle){ cx - 48, y, 96, 96 }, g_app.time);
     snprintf(buf, sizeof buf, tr(S_SURRENDER_Q_FMT), g->players[who].name);
-    text_draw_wrapped(buf, (Rectangle){ c.x + SP_3, c.y + 112, c.width - 2 * SP_3, 96 },
+    text_draw_wrapped(buf, (Rectangle){ c.x + SP_3, y + 112, c.width - 2 * SP_3, 72 },
                       FS_BODY, side_color(who), 1);
 
-    float bw = 240, y = c.y + 224;
-    Rectangle r1 = { cx - bw - SP_2 / 2, y, bw, 56 };
-    Rectangle r2 = { cx + SP_2 / 2, y, bw, 56 };
-    if (ui_button(r1, tr(S_YES), BTN_DANGER)) a = OA_SURRENDER_YES;
-    if (ui_button(r2, tr(S_NO), BTN_NORMAL)) a = OA_SURRENDER_NO;
+    pair_row(c, y + C_SURRENDER - BTN_H, tr(S_NO), BTN_NORMAL, OA_SURRENDER_NO,
+             tr(S_YES), BTN_DANGER, OA_SURRENDER_YES, &a);
     return a;
 }
 
 static OvlAction draw_leave(Rectangle c)
 {
     OvlAction a = OA_NONE;
-    float cx = c.x + c.width / 2;
-    text_draw_wrapped(tr(S_LEAVE_GAME_Q), (Rectangle){ c.x + SP_3, c.y + SP_1, c.width - 2 * SP_3, 110 },
+    float y = c.y + SP_2;
+    text_draw_wrapped(tr(S_LEAVE_GAME_Q), (Rectangle){ c.x + SP_3, y, c.width - 2 * SP_3, 96 },
                       FS_BODY, COL_TEXT, 1);
 
-    float bw = 240, y = c.y + c.height - 56 - SP_1;
-    Rectangle r1 = { cx - bw - SP_2 / 2, y, bw, 56 };
-    Rectangle r2 = { cx + SP_2 / 2, y, bw, 56 };
-    if (ui_button(r1, tr(S_YES), BTN_PRIMARY)) a = OA_LEAVE_YES;
-    if (ui_button(r2, tr(S_NO), BTN_NORMAL)) a = OA_LEAVE_NO;
+    pair_row(c, y + C_LEAVE - BTN_H, tr(S_NO), BTN_NORMAL, OA_LEAVE_NO,
+             tr(S_YES), BTN_PRIMARY, OA_LEAVE_YES, &a);
     return a;
 }
 
@@ -192,29 +247,31 @@ static OvlAction draw_afk(Rectangle c, const Game *g)
 {
     OvlAction a = OA_NONE;
     float cx = c.x + c.width / 2;
+    float y = c.y + SP_2;
     float grace = game_afk_grace_s > 0.0 ? (float)game_afk_grace_s : 1.0f;
     float left = g->afk_left > 0.0 ? (float)g->afk_left : 0.0f;
     int secs = (int)ceilf(left);
     char num[16], line[96];
 
-    text_draw_aligned(tr(S_AFK_Q), cx, c.y, FS_BODY, COL_TEXT, 1);
+    text_draw_aligned(tr(S_AFK_Q), cx, y, FS_BODY, COL_TEXT, 1);
 
     snprintf(num, sizeof num, "%d", secs);
-    draw_center_shadow(num, cx, c.y + 40, FS_HUGE, secs <= OVL_TICK_SECONDS ? COL_DANGER : COL_GOLD);
+    draw_center_shadow(num, cx, y + 40, FS_HUGE, secs <= OVL_TICK_SECONDS ? COL_DANGER : COL_GOLD);
 
     /* Draining bar: gold while there is time, turning danger red as it nears 0. */
     float frac = left / grace;
     if (frac > 1.0f) frac = 1.0f;
-    Rectangle track = { cx - 240, c.y + 160, 480, 24 };
+    Rectangle track = { cx - 240, y + 150, 480, 24 };
     DrawRectangleRec(track, COL_STONE_900);
     Color fill = frac >= 0.5f ? COL_GOLD : color_lerp(COL_DANGER, COL_GOLD, frac * 2.0f);
     DrawRectangleRec((Rectangle){ track.x, track.y, track.width * frac, track.height }, fill);
     DrawRectangleLinesEx(track, 2, COL_STONE_600);
 
     snprintf(line, sizeof line, tr(S_AFK_COUNTDOWN_FMT), secs);
-    text_draw_aligned(line, cx, c.y + 196, FS_SMALL, COL_TEXT_DIM, 1);
+    text_draw_aligned(line, cx, y + 186, FS_SMALL, COL_TEXT_DIM, 1);
 
-    if (ui_button((Rectangle){ cx - 180, c.y + 240, 360, 72 }, tr(S_YES), BTN_PRIMARY)) a = OA_AFK_YES;
+    Rectangle yes = { cx - 180, y + C_AFK - BTN_H, 360, BTN_H };
+    if (ui_button(yes, tr(S_YES), BTN_PRIMARY)) a = OA_AFK_YES;
     return a;
 }
 
@@ -222,6 +279,7 @@ static OvlAction draw_game_over(Rectangle c, const Game *g)
 {
     OvlAction a = OA_NONE;
     float cx = c.x + c.width / 2;
+    float y = c.y + SP_2;
     float t = g_app.time;
     float bob = reduced() ? 0.0f : -fabsf(sinf(t * 4.0f)) * 12.0f;
     int w = g->winner;
@@ -229,16 +287,16 @@ static OvlAction draw_game_over(Rectangle c, const Game *g)
 
     if (w == 0 || w == 1) {
         snprintf(buf, sizeof buf, tr(S_WINS_FMT), g->players[w].name);
-        draw_center_shadow(buf, cx, c.y, FS_H1, side_color(w));
-        art_draw_avatar(g->players[w].avatar, (Rectangle){ cx - 64, c.y + 72 + bob, 128, 128 }, t);
+        draw_center_shadow(buf, cx, y, FS_H1, side_color(w));
+        art_draw_avatar(g->players[w].avatar, (Rectangle){ cx - 56, y + 72 + bob, 112, 112 }, t);
     } else {
-        draw_center_shadow(tr(S_DRAW), cx, c.y, FS_H1, COL_GOLD);
-        art_draw_avatar(g->players[0].avatar, (Rectangle){ cx - 104, c.y + 80 + bob, 96, 96 }, t);
-        art_draw_avatar(g->players[1].avatar, (Rectangle){ cx + 8, c.y + 80 + bob, 96, 96 }, t);
+        draw_center_shadow(tr(S_DRAW), cx, y, FS_H1, COL_GOLD);
+        art_draw_avatar(g->players[0].avatar, (Rectangle){ cx - 104, y + 80 + bob, 96, 96 }, t);
+        art_draw_avatar(g->players[1].avatar, (Rectangle){ cx + 8, y + 80 + bob, 96, 96 }, t);
     }
 
     if (g->mode == MODE_PVE && w >= 0) {
-        draw_center_shadow(tr(w == 0 ? S_YOU_WIN : S_YOU_LOSE), cx, c.y + 216, FS_H2,
+        draw_center_shadow(tr(w == 0 ? S_YOU_WIN : S_YOU_LOSE), cx, y + 196, FS_H2,
                            w == 0 ? COL_GOLD : COL_DANGER);
     }
 
@@ -250,44 +308,71 @@ static OvlAction draw_game_over(Rectangle c, const Game *g)
     case END_DRAW: why = tr(S_REASON_DRAW); break;
     default: break;
     }
-    text_draw_aligned(why, cx, c.y + 270, FS_BODY, COL_TEXT_DIM, 1);
+    text_draw_aligned(why, cx, y + 248, FS_BODY, COL_TEXT_DIM, 1);
 
     fmt_clock(clk, sizeof clk, g->elapsed);
     snprintf(moves, sizeof moves, tr(S_MOVES_FMT), g->move_count);
     snprintf(line, sizeof line, "%s   %s %s", moves, tr(S_ELAPSED), clk);
-    text_draw_aligned(line, cx, c.y + 318, FS_SMALL, COL_TEXT, 1);
+    text_draw_aligned(line, cx, y + 292, FS_SMALL, COL_TEXT, 1);
 
-    float bw = 260, y = c.y + c.height - 56 - SP_1;
-    Rectangle r1 = { cx - bw - SP_2 / 2, y, bw, 56 };
-    Rectangle r2 = { cx + SP_2 / 2, y, bw, 56 };
-    if (ui_button(r1, tr(S_REMATCH), BTN_PRIMARY)) a = OA_REMATCH;
-    if (ui_button(r2, tr(S_HOME), BTN_NORMAL)) a = OA_GAME_HOME;
+    /* One row: "View board" (ghost) on the left, Home, then Rematch (primary) on the right. */
+    float by = y + C_OVER - BTN_H;
+    float bw = 184;
+    Rectangle rv = { c.x, by, bw, BTN_H };
+    Rectangle rh = { c.x + c.width - 2 * bw - BTN_GAP, by, bw, BTN_H };
+    Rectangle rr = { c.x + c.width - bw, by, bw, BTN_H };
+    if (ui_button(rv, pick("View board", "Xem bàn cờ"), BTN_GHOST)) a = OA_PEEK;
+    if (ui_button(rh, tr(S_HOME), BTN_NORMAL)) a = OA_GAME_HOME;
+    if (ui_button(rr, tr(S_REMATCH), BTN_PRIMARY)) a = OA_REMATCH;
     return a;
+}
+
+/* Gold-edged banner shown while the game-over popup is hidden (peek mode). */
+static Rectangle banner_rect(void)
+{
+    return (Rectangle){ (VIRTUAL_W - BANNER_W) / 2, 12, BANNER_W, 56 };
+}
+
+static void draw_peek_banner(const Game *g)
+{
+    Rectangle b = banner_rect();
+    int w = g->winner;
+    char buf[PLAYER_NAME_MAX + 64];
+    const char *msg = tr(S_DRAW);
+    Color col = COL_GOLD;
+
+    if (w == 0 || w == 1) {
+        snprintf(buf, sizeof buf, tr(S_WINS_FMT), g->players[w].name);
+        msg = buf;
+        col = side_color(w);
+    }
+    DrawRectangleRec(b, Fade(COL_STONE_900, 0.92f));
+    DrawRectangleLinesEx(b, 2, COL_GOLD);
+    text_draw_aligned(msg, b.x + SP_2, b.y + (b.height - FS_BODY) / 2, FS_BODY, col, 0);
+    text_draw_aligned(pick("Esc: results", "Esc: kết quả"), b.x + b.width - SP_2,
+                      b.y + (b.height - FS_SMALL) / 2, FS_SMALL, COL_TEXT_DIM, 2);
 }
 
 /* ---------- actions ---------- */
 
-static void do_undo(Game *g)
+/* Undo as the HUD does it (scr_game.c do_undo): PvE undoes at once; PvP sends the request and
+ * the opponent's popup opens on the next update. Returns true when the undo went through. */
+static bool request_undo(Game *g)
 {
     if (g->mode == MODE_PVE) {
-        if (game_request_undo(g, 0)) {
+        if (game_can_request_undo(g, 0) && game_request_undo(g, 0)) {
             audio_play(SFX_UNDO);
             app_toast(tr(S_UNDO_DONE));
-            overlay_close();
-        } else {
-            audio_play(SFX_ERROR);
-            app_toast(tr(S_UNDO_NOT_ALLOWED));
+            return true;
         }
-        return;
-    }
-    /* PvP: the player who made the last move is the one not on turn. */
-    int req = 1 - g->turn;
-    if (game_can_request_undo(g, req) && game_request_undo(g, req)) {
-        overlay_close();   /* UNDO_REQUEST opens on the next update */
     } else {
-        audio_play(SFX_ERROR);
-        app_toast(tr(S_UNDO_NOT_ALLOWED));
+        /* PvP: the player who made the last move is the one not on turn. */
+        int req = 1 - g->turn;
+        if (game_can_request_undo(g, req) && game_request_undo(g, req)) return true;
     }
+    audio_play(SFX_ERROR);
+    app_toast(tr(S_UNDO_NOT_ALLOWED));
+    return false;
 }
 
 static void do_rematch(Game *g)
@@ -303,6 +388,14 @@ static void do_rematch(Game *g)
     app_start_new_game();
 }
 
+/* Leaves the match for Home. A finished match is not resumable, so it is dropped. */
+static void go_home(const Game *g)
+{
+    overlay_close();
+    if (g->status == GS_OVER) g_app.has_game = false;
+    scene_goto(SCENE_HOME);
+}
+
 static void apply_action(OvlAction act)
 {
     Game *g = &g_app.game;
@@ -313,16 +406,15 @@ static void apply_action(OvlAction act)
         overlay_close();
         break;
     case OA_SAVE:
+        /* Pause stays open under the Saves scene, so returning lands on the pause menu. */
         g_app.saves_mode = SAVES_SAVE;
-        overlay_close();
         scene_push(SCENE_SAVES);
         break;
     case OA_UNDO:
-        do_undo(g);
+        if (request_undo(g)) overlay_close();   /* PvP: the request popup takes over */
         break;
     case OA_SETTINGS:
-        overlay_close();
-        scene_push(SCENE_SETTINGS);
+        scene_push(SCENE_SETTINGS);             /* Pause stays open; see OA_SAVE */
         break;
     case OA_ASK_SURRENDER:
         overlay_open(OVL_SURRENDER_CONFIRM);
@@ -350,9 +442,7 @@ static void apply_action(OvlAction act)
         overlay_open(OVL_PAUSE);
         break;
     case OA_LEAVE_YES:
-        overlay_close();
-        if (g->status == GS_OVER) g_app.has_game = false; /* a finished match is not resumable */
-        scene_goto(SCENE_HOME);
+        go_home(g);
         break;
     case OA_LEAVE_NO:
         overlay_open(OVL_PAUSE);
@@ -365,9 +455,10 @@ static void apply_action(OvlAction act)
         do_rematch(g);
         break;
     case OA_GAME_HOME:
-        overlay_close();
-        g_app.has_game = false;
-        scene_goto(SCENE_HOME);
+        go_home(g);
+        break;
+    case OA_PEEK:
+        peek = true;
         break;
     }
 }
@@ -379,7 +470,39 @@ static void play_result_sfx(const Game *g)
     else audio_play(SFX_WIN);
 }
 
+/* Context hint for the bottom bar, by the open popup. */
+static const char *hint_text(void)
+{
+    switch (cur) {
+    case OVL_AFK:
+        return pick("Enter/Space/A or click Yes to keep playing",
+                    "Enter/Space/A hoặc bấm Có để tiếp tục chơi");
+    case OVL_GAME_OVER:
+        if (peek) return pick("Esc/B: show results", "Esc/B: hiện kết quả");
+        return pick("Enter: select   Esc: view board", "Enter: chọn   Esc: xem bàn cờ");
+    case OVL_UNDO_REQUEST:
+        return pick("Arrows: choose   Enter/Space/A: select   Esc/B: decline",
+                    "Mũi tên: chọn   Enter/Space/A: xác nhận   Esc/B: từ chối");
+    default:
+        return pick("Arrows: choose   Enter/Space/A: select   Esc/B: close",
+                    "Mũi tên: chọn   Enter/Space/A: xác nhận   Esc/B: đóng");
+    }
+}
+
 /* ---------- per-frame logic ---------- */
+
+/* Home (keyboard Home key / gamepad Start) while a match is on screen. */
+static void home_pressed(Game *g)
+{
+    if (g->status == GS_OVER) {
+        go_home(g);
+    } else if (cur == OVL_AFK || cur == OVL_UNDO_REQUEST || cur == OVL_LEAVE_CONFIRM) {
+        /* AFK must be answered; an undo request is re-opened every frame until the opponent
+         * answers, so it would hide a Leave popup; Leave is already open. Nothing to do. */
+    } else {
+        overlay_open(OVL_LEAVE_CONFIRM);
+    }
+}
 
 bool overlay_update(float dt)
 {
@@ -392,7 +515,28 @@ bool overlay_update(float dt)
 
     /* Game over: the win line stays visible for a moment, then the popup opens. */
     if (g->status == GS_OVER) {
-        if (cur == OVL_GAME_OVER) return true;
+        if (cur == OVL_GAME_OVER) {
+            if (input_pressed(ACT_HOME, -1)) {
+                go_home(g);
+            } else if (input_pressed(ACT_BACK, -1)) {
+                peek = !peek;
+                if (!peek) focus_default();
+                audio_play(SFX_BACK);
+            } else if (peek && input_mouse_pressed() &&
+                       CheckCollisionPointRec(input_mouse(), banner_rect())) {
+                peek = false;
+                focus_default();
+            } else {
+                return true;
+            }
+            input_consume();
+            return true;
+        }
+        if (input_pressed(ACT_HOME, -1)) {
+            go_home(g);
+            input_consume();
+            return true;
+        }
         if (over_wait < 0.0f) over_wait = OVL_OVER_DELAY_S;
         over_wait -= dt;
         if (cur != OVL_NONE) overlay_close();
@@ -406,7 +550,8 @@ bool overlay_update(float dt)
     }
     over_wait = -1.0f;
 
-    /* AFK timeout: autosave to a free slot (or the oldest), then leave for Home. */
+    /* AFK timeout: autosave to a free slot (or the oldest), then leave for Home. A failed
+     * save keeps the match in memory (Continue can still resume it) and shows the error. */
     if (g->afk == AFK_TIMEOUT) {
         int slot = storage_autosave_slot();
         bool ok = slot >= 0 && storage_save_game(slot, g);
@@ -419,7 +564,6 @@ bool overlay_update(float dt)
             app_toast(buf);
             g_app.has_game = false;
         } else {
-            /* Keep the match in memory so Continue can still resume it. */
             audio_play(SFX_ERROR);
             app_toast(tr(S_LOAD_FAILED));
         }
@@ -427,7 +571,7 @@ bool overlay_update(float dt)
         return true;
     }
 
-    /* AFK prompt takes priority over every other popup. */
+    /* AFK prompt takes priority over every other popup and ignores keys. */
     if (g->afk == AFK_PROMPT) {
         if (cur != OVL_AFK) overlay_open(OVL_AFK);
         int secs = (int)ceilf(g->afk_left > 0.0 ? (float)g->afk_left : 0.0f);
@@ -444,8 +588,16 @@ bool overlay_update(float dt)
         overlay_close();
     }
 
-    /* Esc: back out of the popup; never dismisses AFK / game over. */
-    if (cur != OVL_NONE && input_pressed(ACT_BACK, -1)) {
+    if (cur == OVL_NONE) return false;   /* scr_game handles Esc / Home itself */
+
+    if (input_pressed(ACT_HOME, -1)) {
+        home_pressed(g);
+        input_consume();
+        return true;
+    }
+
+    /* Esc: back out of the popup. An undo request is declined. */
+    if (input_pressed(ACT_BACK, -1)) {
         switch (cur) {
         case OVL_PAUSE:
             overlay_close();
@@ -465,8 +617,9 @@ bool overlay_update(float dt)
         default:
             break;
         }
+        input_consume();   /* this press must not reopen Pause in scr_game */
     }
-    return cur != OVL_NONE;
+    return true;
 }
 
 void overlay_draw(void)
@@ -476,33 +629,38 @@ void overlay_draw(void)
     OvlAction act = OA_NONE;
     float a = ease_out_cubic(appear);
 
-    ui_frame_begin();
-    ui_focus_scope(1);
-    ui_dim_screen(0.55f * a);
-    switch (cur) {
-    case OVL_PAUSE:
-        act = draw_pause(ui_popup(600, 520, tr(S_PAUSED), a), g);
-        break;
-    case OVL_UNDO_REQUEST:
-        act = draw_undo_request(ui_popup(600, 440, tr(S_UNDO), a), g);
-        break;
-    case OVL_SURRENDER_CONFIRM:
-        act = draw_surrender(ui_popup(560, 420, tr(S_SURRENDER), a), g);
-        break;
-    case OVL_LEAVE_CONFIRM:
-        act = draw_leave(ui_popup(560, 340, tr(S_HOME), a));
-        break;
-    case OVL_AFK:
-        act = draw_afk(ui_popup(600, 460, tr(S_AFK_TITLE), a), g);
-        break;
-    case OVL_GAME_OVER:
-        act = draw_game_over(ui_popup(640, 520, tr(S_GAME_OVER), a), g);
-        break;
-    default:
-        break;
+    if (cur == OVL_GAME_OVER && peek) {
+        draw_peek_banner(g);
+    } else {
+        ui_frame_begin();
+        ui_focus_scope(1);
+        ui_dim_screen(0.55f * a);
+        switch (cur) {
+        case OVL_PAUSE:
+            act = draw_pause(ui_popup(600, pop_h(C_PAUSE), tr(S_PAUSED), a), g);
+            break;
+        case OVL_UNDO_REQUEST:
+            act = draw_undo_request(ui_popup(600, pop_h(C_UNDO), tr(S_UNDO), a), g);
+            break;
+        case OVL_SURRENDER_CONFIRM:
+            act = draw_surrender(ui_popup(560, pop_h(C_SURRENDER), tr(S_SURRENDER), a), g);
+            break;
+        case OVL_LEAVE_CONFIRM:
+            act = draw_leave(ui_popup(560, pop_h(C_LEAVE), tr(S_HOME), a));
+            break;
+        case OVL_AFK:
+            act = draw_afk(ui_popup(600, pop_h(C_AFK), tr(S_AFK_TITLE), a), g);
+            break;
+        case OVL_GAME_OVER:
+            act = draw_game_over(ui_popup(640, pop_h(C_OVER), tr(S_GAME_OVER), a), g);
+            break;
+        default:
+            break;
+        }
+        ui_frame_end();
+        ui_focus_scope(0);
     }
-    ui_frame_end();
-    ui_focus_scope(0);
 
+    ui_hint_bar(hint_text());
     apply_action(act);
 }
