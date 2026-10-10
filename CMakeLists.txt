@@ -1,7 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
 project(caro_temple C)
 
-set(CMAKE_C_STANDARD 99)
+if(MSVC)
+  # MSVC has no C99 switch; its C11 mode accepts all the C99 we use.
+  set(CMAKE_C_STANDARD 11)
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
+else()
+  set(CMAKE_C_STANDARD 99)
+endif()
 set(CMAKE_C_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)

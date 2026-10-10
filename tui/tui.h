@@ -58,6 +58,8 @@ void tui_menu_enter(TuiScreen s);
 void tui_menu_event(const TermEvent *ev);
 void tui_menu_update(double dt);
 void tui_menu_draw(void);
+/* Draw avatar mascot (16x8 half-block cells) with top-left at (x, y). Defined in tui_menu.c. */
+void tui_draw_mascot(int x, int y, int avatar, TColor bg, bool bob, bool flicker);
 
 /* tui_game.c: GAME screen incl. pause menu, undo/surrender/AFK/game-over popups */
 void tui_game_enter(void);

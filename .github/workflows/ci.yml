@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux (GCC)
+            os: ubuntu-latest
+            cc: gcc
+          - name: Linux (Clang)
+            os: ubuntu-latest
+            cc: clang
+          - name: macOS (Apple Clang)
+            os: macos-latest
+            cc: clang
+          - name: Windows (MSVC)
+            os: windows-latest
+            cc: cl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies (raylib needs X11/GL/ALSA headers)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libgl1-mesa-dev libasound2-dev xvfb
+
+      - name: Configure
+        shell: bash
+        run: |
+          if [ "${{ matrix.cc }}" = "cl" ]; then
+            cmake -S . -B build
+          else
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=${{ matrix.cc }}
+          fi
+
+      - name: Build (core, tests, terminal version, GUI version)
+        run: cmake --build build --config Release --parallel
+
+      - name: Unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: GUI smoke test (headless screenshots)
+        if: runner.os == 'Linux'
+        run: |
+          cd build
+          export CARO_DATA_DIR="$RUNNER_TEMP/caro-data"
+          for s in home setup profile settings saves game pause gameover; do
+            xvfb-run -a -s "-screen 0 1280x720x24" ./caro --scene $s --frames 30 --shot "$RUNNER_TEMP/$s.png"
+            test -s "$RUNNER_TEMP/$s.png"
+          done
+
+      - name: Upload screenshots
+        if: runner.os == 'Linux' && matrix.cc == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: ${{ runner.temp }}/*.png
+
+  windows-mingw:
+    name: Windows (MinGW-w64 GCC)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            git
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
