@@ -3,6 +3,8 @@
  * Test/e2e flags:
  *   --scene home|setup|profile|settings|saves|game|pause|gameover|afk|undo|surrender
  *   --board 3|5|10   --pvp   --frames N (default 45)   --shot out.png (save virtual screen, exit)
+ * Env CARO_TRACE=<file>: append "scene N", "overlay N" and "moves N" lines whenever they
+ * change (used by the end-to-end tests to assert on what input did).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,6 +113,10 @@ int main(int argc, char **argv)
     scene_init(first);
     if (ovl != OVL_NONE) overlay_open(ovl);
 
+    FILE *trace = NULL;
+    if ((e = getenv("CARO_TRACE")) != NULL) trace = fopen(e, "a");
+    int tr_scene = -1, tr_ovl = -1, tr_moves = -1;
+
     int frame = 0;
     while (!WindowShouldClose() && !g_app.quit) {
         float dt = GetFrameTime();
@@ -163,6 +169,17 @@ int main(int argc, char **argv)
                        (Rectangle){ox, oy, VIRTUAL_W * scale, VIRTUAL_H * scale}, (Vector2){0, 0}, 0, WHITE);
         EndDrawing();
 
+        if (trace) {
+            int sc = scene_transitioning() ? tr_scene : (int)scene_current();
+            int ov = (int)overlay_current();
+            int mv = g_app.has_game ? g_app.game.move_count : -1;
+            if (sc != tr_scene) fprintf(trace, "scene %d\n", sc);
+            if (ov != tr_ovl) fprintf(trace, "overlay %d\n", ov);
+            if (mv != tr_moves) fprintf(trace, "moves %d\n", mv);
+            if (sc != tr_scene || ov != tr_ovl || mv != tr_moves) fflush(trace);
+            tr_scene = sc; tr_ovl = ov; tr_moves = mv;
+        }
+
         frame++;
         if (shot && frame >= frames) {
             Image img = LoadImageFromTexture(target.texture);
@@ -173,6 +190,7 @@ int main(int argc, char **argv)
         }
     }
 
+    if (trace) fclose(trace);
     ai_worker_shutdown();
     audio_shutdown();
     fx_shutdown();

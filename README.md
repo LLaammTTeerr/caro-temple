@@ -60,11 +60,18 @@ docs/   DESIGN.md (UI design system and screen specs), mockups
 ```
 
 ## Tests
-- `ctest`: unit tests for rules, AI (Hard never loses 3x3, beats Easy on 10x10, < 300 ms per move), match state (clocks, undo, AFK), saves/settings, strings.
-- `tests/e2e_gui.sh build` (Linux, needs Xvfb and libXtst): drives the real GUI with injected keyboard and mouse input through `tools/xinj.c`. It plays a 2-player match to a win, then a rematch, then pause → save, leave → load, and an AFK autosave, and checks the results. CI runs it on every push.
-- `tests/e2e_tui.sh build` (Linux/macOS, needs tmux) and `tests/e2e_tui_windows.py` (Windows, through ConPTY with `pywinpty`): play the terminal version with real key input. They cover setup → profile → match vs the computer → pause → Home → Continue → quit.
-- CI matrix (`.github/workflows/ci.yml`): Linux GCC and Clang, macOS Apple Clang, Windows MSVC and MinGW-w64. Unit tests run everywhere, and the terminal end-to-end tests run on Linux, macOS and Windows. The GUI runs headlessly on Linux and on Windows (Mesa software OpenGL), and CI keeps the screenshots as artifacts. GitHub's macOS VMs have no OpenGL GPU, so the macOS GUI only gets built there, not run.
-- Linux terminal gamepad: only devices with at least 4 buttons and 2 axes are used, and axes resting off-centre are ignored. Set `CARO_NO_GAMEPAD=1` to disable gamepad input entirely.
+**CI runs behaviour tests only.** These drive the real programs with real input and assert on what happened:
+- `ctest`: unit tests for rules, the AI (Hard never loses on 3x3, beats Easy on 10x10, < 300 ms per move), match state (clocks, undo, AFK), saves/settings and strings.
+- `tests/e2e_gui.sh build` (Linux): XTest keyboard and mouse into the GUI. Covers a 2-player match to a win, rematch, pause → save, Home → load, and AFK autosave.
+- `tests/e2e_gui_windows.ps1` (Windows): `SendInput` keyboard and mouse into the GUI. Covers menus → match, a mouse click on the board, pause, and Home.
+- `sudo tests/e2e_gamepad.sh build` (Linux): a virtual Xbox 360 controller (uinput) drives both versions. Covers D-pad/A navigating menus into a match, A placing a stone, B pause/back, and Start → Home.
+- `tests/e2e_tui.sh build` (Linux/macOS, tmux) and `tests/e2e_tui_windows.py` (Windows ConPTY, `pywinpty` + `pyte`): the terminal version from setup through a match to quit.
+- Runs on Linux GCC and Clang, macOS Apple Clang, and Windows MSVC (MinGW-w64 builds and runs the unit tests).
+
+**Layout is checked manually offline:** `tests/layout_shots.sh build` renders every GUI scene on every board size, PvE and PvP, in English and Vietnamese, plus captures of the terminal screens, and builds contact sheets to review.
+
+- Linux terminal gamepad: only devices with at least 4 buttons and 2 axes are used, and axes resting off-centre are ignored. `CARO_NO_GAMEPAD=1` disables gamepad input.
+- `CARO_TRACE=<file>` makes the GUI log scene, popup and move-count changes; the end-to-end tests assert on it.
 
 ## Testing hooks
 - `caro --scene <home|setup|profile|settings|saves|game|pause|undo|afk|surrender|gameover> [--board 3|5|10] [--pvp] --shot out.png` renders one scene and saves a screenshot. CI uses it headlessly.
