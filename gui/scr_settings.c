@@ -13,15 +13,16 @@
 #include "../core/i18n.h"
 
 #define PANEL_Y      96
-#define PANEL_H      508
+#define PANEL_H      456
 #define PANEL_W      552
 #define LEFT_X       64
 #define RIGHT_X      664
 #define ROW_H        48    /* settings row height */
-#define ROW_STEP     64    /* settings row pitch (height + 16 gap) */
+#define ROW_STEP     56    /* settings row pitch (height + 8 gap) */
 #define KEY_H        36    /* key cap height */
-#define CTRL_STEP    80    /* controls row pitch */
+#define CTRL_STEP    72    /* controls row pitch */
 #define PREVIEW_STEP 0.125f /* SFX preview throttle: 8 per second */
+#define BACK_Y       576   /* Back button: below both panels, above the hint bar (y 672) */
 
 static const char *const LANG_OPTIONS[LANG_COUNT] = { "English", "Ti\xe1\xbb\x87ng Vi\xe1\xbb\x87t" };
 
@@ -43,9 +44,9 @@ static void go_back(void)
 
 static void go_home(void)
 {
-    /* Came from a match: return to it without discarding the match in memory. */
-    if (scene_previous() == SCENE_GAME && g_app.has_game) scene_pop();
-    else scene_goto(SCENE_HOME);
+    /* PRD: Home always returns to the main menu. A match in progress stays in memory, so the
+     * Home screen's Continue resumes it. */
+    scene_goto(SCENE_HOME);
 }
 
 static void draw_backdrop(void)
@@ -215,7 +216,7 @@ static void settings_draw(void)
     draw_settings_panel((Rectangle){LEFT_X, PANEL_Y, PANEL_W, PANEL_H});
     draw_controls_panel((Rectangle){RIGHT_X, PANEL_Y, PANEL_W, PANEL_H});
 
-    if (ui_button((Rectangle){LEFT_X, 632, 200, 56}, tr(S_BACK), BTN_NORMAL)) go_back();
+    if (ui_button((Rectangle){LEFT_X, BACK_Y, 200, 56}, tr(S_BACK), BTN_NORMAL)) go_back();
     ui_hint_bar(tr(S_HINT_MENU));
     ui_frame_end();
 }

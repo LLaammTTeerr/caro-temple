@@ -103,14 +103,14 @@ static void draw_card_used(const SlotInfo *s, Rectangle c, int slot)
     static const StrId diff_ids[DIFF_COUNT] = { S_DIFF_EASY, S_DIFF_MEDIUM, S_DIFF_HARD };
 
     snprintf(line, sizeof line, tr(S_SLOT_FMT), slot + 1);
-    text_draw(line, c.x + SP_2, c.y + SP_1, FS_BODY, COL_GOLD);
+    text_draw(line, c.x + SP_3, c.y + SP_1, FS_BODY, COL_GOLD);
 
     format_date(s, date, sizeof date);
-    text_draw_aligned(date, c.x + c.width - SP_2, c.y + SP_2 - 4, FS_SMALL, COL_TEXT_DIM, 2);
+    text_draw_aligned(date, c.x + c.width - SP_3, c.y + SP_2 - 4, FS_SMALL, COL_TEXT_DIM, 2);
 
     snprintf(names, sizeof names, "%s vs %s", s->p1, s->p2);
-    fit_text(line, sizeof line, names, c.width - SP_2 - DEL_RIGHT - DEL_W - SP_2);
-    text_draw(line, c.x + SP_2, c.y + 44, FS_SMALL, COL_TEXT);
+    fit_text(line, sizeof line, names, c.width - SP_3 - DEL_RIGHT - DEL_W - SP_2);
+    text_draw(line, c.x + SP_3, c.y + 44, FS_SMALL, COL_TEXT);
 
     if (s->mode == MODE_PVE) {
         if ((int)s->diff >= 0 && (int)s->diff < DIFF_COUNT)
@@ -121,24 +121,46 @@ static void draw_card_used(const SlotInfo *s, Rectangle c, int slot)
         snprintf(mode, sizeof mode, "%s - %s", tr(S_MODE_PVP), board_label(s->board_n));
     }
     fit_text(line, sizeof line, mode, 300);
-    text_draw(line, c.x + SP_2, c.y + 68, FS_SMALL, COL_TEXT_DIM);
+    text_draw(line, c.x + SP_3, c.y + 68, FS_SMALL, COL_TEXT_DIM);
 
     snprintf(line, sizeof line, tr(S_MOVES_FMT), s->move_count);
     text_draw_aligned(line, c.x + c.width - DEL_RIGHT - DEL_W - SP_2, c.y + 68, FS_SMALL, COL_TEXT_DIM, 2);
 }
 
-/* Draws one card; its interactive parts are called in order: card button, then Delete. */
+/* Dashed rectangle outline, used for empty slots. */
+static void draw_dashed_rect(Rectangle r, float thick, Color col)
+{
+    const float dash = 12, gap = 8;
+    for (float x = r.x; x < r.x + r.width; x += dash + gap) {
+        float w = x + dash > r.x + r.width ? r.x + r.width - x : dash;
+        DrawRectangleRec((Rectangle){ x, r.y, w, thick }, col);
+        DrawRectangleRec((Rectangle){ x, r.y + r.height - thick, w, thick }, col);
+    }
+    for (float y = r.y; y < r.y + r.height; y += dash + gap) {
+        float h = y + dash > r.y + r.height ? r.y + r.height - y : dash;
+        DrawRectangleRec((Rectangle){ r.x, y, thick, h }, col);
+        DrawRectangleRec((Rectangle){ r.x + r.width - thick, y, thick, h }, col);
+    }
+}
+
+/* Draws one card. The card body is the full card rect, so the focus / hover ring (drawn by the
+ * ghost button) surrounds the whole card. The Delete button is inside the card; a click on it
+ * is not counted as a click on the body. Interactive parts are called in order: body, then Delete. */
 static void draw_card(int i, Rectangle c)
 {
     const SlotInfo *s = &slots[i];
     bool load = g_app.saves_mode == SAVES_LOAD;
+    Rectangle del = { c.x + c.width - DEL_W - DEL_RIGHT, c.y + c.height - DEL_H - SP_1, DEL_W, DEL_H };
 
     ui_panel(c);
-    if (!s->used) DrawRectangleRec(c, Fade(COL_STONE_900, 0.4f));
+    if (!s->used) {
+        DrawRectangleRec(c, Fade(COL_STONE_900, 0.4f));
+        draw_dashed_rect((Rectangle){ c.x + 4, c.y + 4, c.width - 8, c.height - 8 }, 2, COL_STONE_900);
+    }
 
-    /* Card body is the interactive area; the Delete button sits on the right, so the body stops short of it. */
-    Rectangle body = { c.x, c.y, c.width - DEL_W - DEL_RIGHT - SP_2 - SP_1, c.height };
-    if (ui_button(body, "", BTN_GHOST)) {
+    bool body_click = ui_button(c, "", BTN_GHOST);
+    bool on_delete = s->used && CheckCollisionPointRec(input_mouse(), del);
+    if (body_click && !on_delete) {
         if (!s->used) {
             if (load) {
                 audio_play(SFX_ERROR);
@@ -156,13 +178,12 @@ static void draw_card(int i, Rectangle c)
 
     if (s->used) {
         draw_card_used(s, c, i);
-        Rectangle del = { c.x + c.width - DEL_W - DEL_RIGHT, c.y + c.height - DEL_H - SP_1, DEL_W, DEL_H };
         if (ui_button(del, tr(S_DELETE), BTN_DANGER)) open_popup(POP_DELETE, i);
     } else {
         char line[48];
         snprintf(line, sizeof line, tr(S_SLOT_FMT), i + 1);
-        text_draw(line, c.x + SP_2, c.y + SP_1, FS_BODY, COL_TEXT_DIM);
-        text_draw(tr(S_EMPTY_SLOT), c.x + SP_2, c.y + 44, FS_SMALL, COL_TEXT_DIM);
+        text_draw(line, c.x + SP_3, c.y + SP_1, FS_BODY, Fade(COL_TEXT, 0.7f));
+        text_draw(tr(S_EMPTY_SLOT), c.x + SP_3, c.y + 44, FS_SMALL, Fade(COL_TEXT, 0.7f));
     }
 }
 

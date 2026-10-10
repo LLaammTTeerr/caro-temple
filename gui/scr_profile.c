@@ -16,25 +16,26 @@
 #include "../core/i18n.h"
 
 #define CARD_W        400
-#define CARD_H        472
-#define CARD_Y        112
+#define CARD_H        496
+#define CARD_Y        100
 #define CARD_GAP      48
 #define INNER_X       20          /* card padding for controls */
 #define INNER_W       360
-#define AVATAR_PX     160
+#define AVATAR_PX     144
 #define AVATAR_Y      96
-#define AVATAR_CHOICE_Y 272
-#define NAME_LABEL_Y  344
-#define NAME_BOX_Y    368
-#define NAME_ERR_Y    432
+#define CAPTION_Y     246         /* "Avatar" caption above the thumbnails */
+#define THUMB_PX      48
+#define THUMB_GAP     14
+#define THUMB_Y       276
+#define AVATAR_CHOICE_Y 336       /* mascot name selector (no inline label: it is captioned above) */
+#define NAME_LABEL_Y  404
+#define NAME_BOX_Y    428
 #define NAME_MAX_CP   16          /* visible characters */
 #define BTN_Y         608
 #define BTN_W         200
 #define ROW_CHOICE_H  56
-#define TITLE_Y       40
+#define TITLE_Y       32
 #define BTN_GAP       SP_3
-
-static const char *const avatar_opts[AVATAR_COUNT] = { "1/6", "2/6", "3/6", "4/6", "5/6", "6/6" };
 
 /* Editable copies of the two names/avatars; written to settings only on a valid Start. */
 static char names[2][PLAYER_NAME_MAX];
@@ -82,9 +83,22 @@ static void draw_card(int p, float x, float t)
                       FS_SMALL, tint, 1);
 
     art_draw_avatar(avatars[p], (Rectangle){ r.x + (r.width - AVATAR_PX) / 2, r.y + AVATAR_Y, AVATAR_PX, AVATAR_PX }, t);
+    text_draw(tr(S_AVATAR), r.x + INNER_X, r.y + CAPTION_Y, FS_SMALL, COL_TEXT_DIM);
 
-    ui_choice((Rectangle){ r.x + INNER_X, r.y + AVATAR_CHOICE_Y, INNER_W, ROW_CHOICE_H }, tr(S_AVATAR),
-              avatar_opts, AVATAR_COUNT, &avatars[p]);
+    /* Focus order within a card: mascot name choice (keyboard path), thumbnails, name box.
+     * Thumbnails are drawn with their own ghost buttons; the unselected ones are dimmed. */
+    const char *names_opt[AVATAR_COUNT];
+    for (int i = 0; i < AVATAR_COUNT; i++) names_opt[i] = tr((StrId)(S_AVATAR_0 + i));
+    ui_choice((Rectangle){ r.x + INNER_X, r.y + AVATAR_CHOICE_Y, INNER_W, ROW_CHOICE_H }, "",
+              names_opt, AVATAR_COUNT, &avatars[p]);
+
+    for (int i = 0; i < AVATAR_COUNT; i++) {
+        Rectangle th = { r.x + INNER_X + i * (THUMB_PX + THUMB_GAP), r.y + THUMB_Y, THUMB_PX, THUMB_PX };
+        if (ui_button(th, "", BTN_GHOST)) avatars[p] = i;
+        art_draw_avatar(i, th, t);
+        if (i == avatars[p]) DrawRectangleLinesEx(th, 3, COL_GOLD);
+        else DrawRectangleRec(th, Fade(COL_STONE_900, 0.45f));
+    }
 
     text_draw(tr(S_NAME), r.x + INNER_X, r.y + NAME_LABEL_Y, FS_SMALL, COL_TEXT_DIM);
     ui_textbox((Rectangle){ r.x + INNER_X, r.y + NAME_BOX_Y, INNER_W, ROW_CHOICE_H }, names[p], PLAYER_NAME_MAX,
@@ -92,7 +106,8 @@ static void draw_card(int p, float x, float t)
     name_clamp(names[p], NAME_MAX_CP);
 
     if (show_err[p] && is_blank(names[p])) {
-        text_draw(tr(S_NAME_EMPTY), r.x + INNER_X, r.y + NAME_ERR_Y, FS_SMALL, COL_DANGER);
+        float lx = r.x + INNER_X + text_measure(tr(S_NAME), FS_SMALL).x + SP_2;
+        text_draw(tr(S_NAME_EMPTY), lx, r.y + NAME_LABEL_Y, FS_SMALL, COL_DANGER);
     }
 }
 

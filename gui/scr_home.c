@@ -15,7 +15,7 @@
 #define MENU_W        360
 #define MENU_H        60
 #define MENU_GAP      SP_2
-#define MENU_Y        260
+#define MENU_Y        276
 #define MENU_ITEMS    5
 #define MASCOT_PX     176
 #define MASCOT_Y      480
@@ -156,8 +156,9 @@ static void draw(void)
     ui_focus_scope(0);
 
     art_draw_title(VIRTUAL_W / 2.0f, 64, 1, t);
-    text_draw_shadow(tr(S_GAME_SUBTITLE), VIRTUAL_W / 2.0f - text_measure(tr(S_GAME_SUBTITLE), FS_BODY).x / 2,
-                     176, FS_BODY, COL_GOLD_DARK);
+    /* Subtitle sits below the carved title (title glyphs end near y 200) in gold with a dark outline. */
+    text_draw_outline(tr(S_GAME_SUBTITLE), VIRTUAL_W / 2.0f - text_measure(tr(S_GAME_SUBTITLE), FS_BODY).x / 2,
+                      212, FS_BODY, COL_GOLD, COL_STONE_900, 2);
     art_draw_mascot(MASCOT_FIRE, (Rectangle){ 120, MASCOT_Y, MASCOT_PX, MASCOT_PX }, t, animate);
     art_draw_mascot(MASCOT_WATER, (Rectangle){ VIRTUAL_W - 120 - MASCOT_PX, MASCOT_Y, MASCOT_PX, MASCOT_PX }, t, animate);
 
