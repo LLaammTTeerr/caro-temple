@@ -67,6 +67,19 @@ jobs:
         timeout-minutes: 5
         run: sudo -E env "PATH=$PATH" XINJ_SCALE=2 tests/e2e_gamepad.sh build
 
+      - name: GUI end-to-end test (macOS, System Events key input)
+        if: runner.os == 'macOS'
+        timeout-minutes: 8
+        env:
+          XINJ_SCALE: "2"
+        run: |
+          # GitHub's macOS VMs have no GPU and GLFW insists on a hardware-accelerated pixel
+          # format, so for this CI run only, let macOS fall back to its software OpenGL
+          # renderer (real Macs always have an accelerated renderer; the shipped build is untouched).
+          sed -i '' '/ADD_ATTRIB(NSOpenGLPFAAccelerated);/d' build/_deps/raylib-src/src/external/glfw/src/nsgl_context.m
+          cmake --build build --config Release --parallel --target caro
+          tests/e2e_gui_macos.sh build
+
       - name: Terminal version end-to-end test (tmux)
         if: runner.os != 'Windows'
         timeout-minutes: 5
