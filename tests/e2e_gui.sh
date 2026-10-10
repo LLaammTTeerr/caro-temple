@@ -76,11 +76,9 @@ grep -q '^end=1' "$WORK/data/slot03.sav" || fail "slot 3 save incomplete"
 # one move played in step 2 (otherwise the first match would have continued with 6+ moves).
 grep -q '^moves=1$' "$WORK/data/slot03.sav" || fail "step 1 did not finish with a win (rematch not started)"
 
-echo "== 3. Leave -> Home -> Load Game -> slot 3"
+echo "== 3. Pause Home -> main screen (no confirm) -> Load Game -> slot 3"
 inj <<'K'
 click 648 576
-sleep 600
-click 766 446
 sleep 900
 click 640 459
 sleep 900

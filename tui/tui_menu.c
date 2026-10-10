@@ -28,7 +28,7 @@ typedef struct {
     int id;
     int kind;
     const char *label;      /* may be NULL (box only) */
-    char vbuf[48];          /* formatted value for choice/toggle/slider */
+    char vbuf[64];          /* formatted value for choice/toggle/slider */
     const char *value;      /* points at vbuf */
     char *buf;              /* text field storage (MI_TEXT) */
     bool enabled;
@@ -267,7 +267,7 @@ static int board_index(void)
 
 static void fmt_avatar(char *buf, int avatar)
 {
-    snprintf(buf, 48, "< %s %d/%d >", tr(S_AVATAR), avatar + 1, AVATAR_COUNT);
+    snprintf(buf, 64 /* = sizeof vbuf */, "< %s %d/%d >", tr((StrId)(S_AVATAR_0 + (avatar % AVATAR_COUNT))), avatar + 1, AVATAR_COUNT);
 }
 
 static void fmt_pct(char *buf, int pct)

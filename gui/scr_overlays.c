@@ -420,7 +420,7 @@ static void apply_action(OvlAction act)
         overlay_open(OVL_SURRENDER_CONFIRM);
         break;
     case OA_ASK_HOME:
-        overlay_open(OVL_LEAVE_CONFIRM);
+        go_home(g);                             /* PRD: Home exits straight to the main screen */
         break;
     case OA_UNDO_ACCEPT:
         game_answer_undo(g, true);
@@ -500,7 +500,7 @@ static void home_pressed(Game *g)
         /* AFK must be answered; an undo request is re-opened every frame until the opponent
          * answers, so it would hide a Leave popup; Leave is already open. Nothing to do. */
     } else {
-        overlay_open(OVL_LEAVE_CONFIRM);
+        go_home(g);  /* PRD: Start / Home exits to the main screen; Continue resumes the match */
     }
 }
 

@@ -343,7 +343,7 @@ static void popup_activate(int idx)
         case PAUSE_UNDO: popup = POP_NONE; request_undo_now(); break;
         case PAUSE_SETTINGS: popup = POP_NONE; tui_goto(TS_SETTINGS); break;
         case PAUSE_SURRENDER: open_surrender(); break;
-        case PAUSE_HOME: open_popup(POP_LEAVE); break;
+        case PAUSE_HOME: popup = POP_NONE; tui_goto(TS_HOME); break;
         default: break;
         }
         break;
@@ -457,7 +457,7 @@ static void game_key(const TermEvent *ev)
     }
     switch (a) {
     case ACT_BACK: open_popup(POP_PAUSE); break;
-    case ACT_HOME: open_popup(POP_LEAVE); break;
+    case ACT_HOME: popup = POP_NONE; tui_goto(TS_HOME); break; /* match kept for Continue */
     case ACT_UP: case ACT_DOWN: case ACT_LEFT: case ACT_RIGHT: {
         int idx = human_index(pl);
         if (idx < 0) break;
@@ -488,7 +488,7 @@ static void board_click(Pos p)
     place_at(idx, p);
 }
 
-/* Bottom bar buttons: 0 undo, 1 surrender, 2 menu (pause), 3 home (leave confirm). */
+/* Bottom bar buttons: 0 undo, 1 surrender, 2 menu (pause), 3 home (to the main menu). */
 static bool button_rect(int i, int *x, int *y)
 {
     int cols, rows;
@@ -515,7 +515,7 @@ static void bar_click(int mx, int my)
     if (i == 0) request_undo_now();
     else if (i == 1) open_surrender();
     else if (i == 2) open_popup(POP_PAUSE);
-    else if (i == 3) open_popup(POP_LEAVE);
+    else if (i == 3) { popup = POP_NONE; tui_goto(TS_HOME); }
 }
 
 /* Hover (no popup open): highlights the bottom-bar button under the pointer and moves the

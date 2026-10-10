@@ -226,7 +226,9 @@ static void update(float dt)
     sync(g);
     tick_sound(g);
 
-    if (input_pressed(ACT_HOME, -1)) { overlay_open(OVL_LEAVE_CONFIRM); return; }
+    /* PRD: Home / gamepad Start exits straight to the main screen (the match stays in memory
+     * and Home's Continue resumes it). */
+    if (input_pressed(ACT_HOME, -1)) { scene_goto(SCENE_HOME); return; }
     bool playing = g->status == GS_PLAYING;
     if (playing && input_pressed(ACT_BACK, -1)) { overlay_open(OVL_PAUSE); return; }
 
@@ -465,7 +467,7 @@ static void draw_actions(Game *g)
     gate(true);
     if (ui_button(mr, tr(S_MENU), BTN_NORMAL)) overlay_open(OVL_PAUSE);
     gate(true);
-    if (ui_home_button()) overlay_open(OVL_LEAVE_CONFIRM);
+    if (ui_home_button()) scene_goto(SCENE_HOME);
 
     if (!playing) {
         DrawRectangleRec(ur, Fade(COL_STONE_900, 0.55f));

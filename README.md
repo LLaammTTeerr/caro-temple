@@ -20,7 +20,7 @@ Two versions share one game core:
 - Mouse (hover + click), keyboard and Xbox-style gamepad:
   - **Player 1:** `W A S D` + `Space`
   - **Player 2:** arrow keys + `Enter`
-  - **Menus:** `Esc` goes back; the on-screen Home button, the `Home` key or gamepad Start goes to the main menu (during a match it asks first, so a stray press doesn't abandon the game)
+  - **Menus:** `Esc` goes back; the on-screen Home button, the `Home` key or gamepad Start goes straight to the main menu; a match in progress stays in memory and **Continue** resumes it
   - **Gamepad:** D-pad / left stick moves, A places, B goes back; two pads give each player their own
   - **Gamepad support by version:** the GUI version supports gamepads everywhere raylib does. The terminal version supports them on Linux (joystick API) and Windows (XInput, loaded at runtime), but not on macOS.
 - HUD with the match start time, a 10-minute clock per player, and the opponent's last move highlighted.
